@@ -1,0 +1,19 @@
+# 機密情報
+.env
+credentials.json
+token.json
+service_account.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# ログ
+app.log
+
+# OS
+.DS_Store
+Thumbs.db

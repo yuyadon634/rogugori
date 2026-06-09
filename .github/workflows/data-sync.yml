@@ -1,0 +1,46 @@
+name: data-sync
+
+on:
+  schedule:
+    # 毎時0分に実行（UTC） = JST 毎時9分
+    # JST に合わせるため UTC で 21:00〜14:00（翌日）をカバー
+    - cron: "0 * * * *"
+  workflow_dispatch: # 手動実行用
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run data-sync
+        env:
+          GARMIN_EMAIL: ${{ secrets.GARMIN_EMAIL }}
+          GARMIN_PASSWORD: ${{ secrets.GARMIN_PASSWORD }}
+          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+          LINE_USER_ID: ${{ secrets.LINE_USER_ID }}
+          GOOGLE_SHEETS_ID: ${{ secrets.GOOGLE_SHEETS_ID }}
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          GOOGLE_FIT_CREDENTIALS_JSON: ${{ secrets.GOOGLE_FIT_CREDENTIALS_JSON }}
+          GOOGLE_FIT_TOKEN_JSON: ${{ secrets.GOOGLE_FIT_TOKEN_JSON }}
+        run: python -m src.data_sync
+
+      - name: Upload log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-log-data-sync-${{ github.run_id }}
+          path: app.log
+          retention-days: 7
