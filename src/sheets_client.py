@@ -64,9 +64,17 @@ class SheetsClient:
     def _get_or_create_sheet(self, title: str, headers: list[str]) -> gspread.Worksheet:
         try:
             ws = self._spreadsheet.worksheet(title)
+            # 既存シートのヘッダー行を確認・修復する
+            first_row = ws.row_values(1)
+            if first_row != headers:
+                logger.warning(
+                    "シート '%s' のヘッダーが不正です。修復します: %s → %s",
+                    title, first_row, headers
+                )
+                ws.update("A1", [headers])
         except gspread.WorksheetNotFound:
             ws = self._spreadsheet.add_worksheet(title=title, rows=1000, cols=len(headers))
-            ws.append_row(headers)
+            ws.update("A1", [headers])
             logger.info("シート '%s' を作成しました", title)
         return ws
 
@@ -132,7 +140,7 @@ class SheetsClient:
     def get_today_status(self) -> dict:
         """当日の status 行を返す。存在しない場合は初期値で新規作成する。"""
         today = str(date.today())
-        records = self._status_ws.get_all_records()
+        records = self._status_ws.get_all_records(expected_headers=STATUS_HEADERS)
         for row in records:
             if row.get("date") == today:
                 return dict(row)
@@ -151,7 +159,7 @@ class SheetsClient:
     def update_status(self, updates: dict) -> None:
         """当日の status 行の指定フィールドを更新する。"""
         today = str(date.today())
-        records = self._status_ws.get_all_records()
+        records = self._status_ws.get_all_records(expected_headers=STATUS_HEADERS)
         for i, row in enumerate(records):
             if row.get("date") == today:
                 row.update(updates)
