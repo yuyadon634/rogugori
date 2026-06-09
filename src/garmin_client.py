@@ -36,7 +36,8 @@ class GarminClient:
         logger.info("Garmin に再ログインします")
         client = Garmin(self._email, self._password)
         client.login()
-        session_json = json.dumps(client.session_data)
+        # 新しいバージョンの garminconnect は client.client.dumps() でトークンを取得する
+        session_json = client.client.dumps()
         self._sheets.save_garmin_session(session_json)
         self._client = client
         logger.info("Garmin ログイン成功・セッション保存完了")
@@ -52,10 +53,9 @@ class GarminClient:
         session_json = self._sheets.get_garmin_session()
         if session_json:
             try:
-                session_data = json.loads(session_json)
+                # tokenstore 文字列を直接渡してログイン（MFA不要）
                 client = Garmin(self._email, self._password)
-                client.session_data = session_data
-                client.login()
+                client.login(tokenstore=session_json)
                 self._client = client
                 logger.info("保存済みセッションで Garmin に接続しました")
                 return
