@@ -53,8 +53,8 @@ class GarminClient:
         session_json = self._sheets.get_garmin_session()
         if session_json:
             try:
-                # tokenstore 文字列を直接渡してログイン（MFA不要）
-                client = Garmin(self._email, self._password)
+                # verify_login=False でトークン検証APIコールを省略し429を回避する
+                client = Garmin(self._email, self._password, verify_login=False)
                 client.login(tokenstore=session_json)
                 self._client = client
                 logger.info("保存済みセッションで Garmin に接続しました")
