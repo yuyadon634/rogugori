@@ -81,14 +81,7 @@ class SheetsClient:
     def _ensure_sheets(self) -> None:
         self._daily_ws = self._get_or_create_sheet(SHEET_DAILY_SUMMARY, DAILY_SUMMARY_HEADERS)
         self._status_ws = self._get_or_create_sheet(SHEET_STATUS, STATUS_HEADERS)
-        try:
-            self._session_ws = self._spreadsheet.worksheet(SHEET_SESSION)
-        except gspread.WorksheetNotFound:
-            self._session_ws = self._spreadsheet.add_worksheet(
-                title=SHEET_SESSION, rows=10, cols=2
-            )
-            self._session_ws.append_row(["key", "value"])
-            logger.info("シート '%s' を作成しました", SHEET_SESSION)
+        self._session_ws = self._get_or_create_sheet(SHEET_SESSION, ["key", "value"])
 
     # ------------------------------------------------------------------
     # daily_summary
@@ -190,7 +183,7 @@ class SheetsClient:
 
     def get_garmin_session(self) -> Optional[str]:
         """保存済みのGarminセッションJSON文字列を返す。なければ None。"""
-        records = self._session_ws.get_all_records()
+        records = self._session_ws.get_all_records(expected_headers=["key", "value"])
         for row in records:
             if row.get("key") == "garmin_session":
                 v = row.get("value", "")
@@ -199,7 +192,7 @@ class SheetsClient:
 
     def save_garmin_session(self, session_json: str) -> None:
         """GarminセッションJSON文字列を保存（上書き）する。"""
-        records = self._session_ws.get_all_records()
+        records = self._session_ws.get_all_records(expected_headers=["key", "value"])
         for i, row in enumerate(records):
             if row.get("key") == "garmin_session":
                 row_index = i + 2
