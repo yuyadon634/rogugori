@@ -10,34 +10,13 @@ from linebot import LineBotApi
 from linebot.models import (
     BubbleContainer,
     BoxComponent,
-    ButtonComponent,
     FlexSendMessage,
-    PostbackAction,
     SeparatorComponent,
     TextComponent,
     TextSendMessage,
 )
 
 logger = logging.getLogger(__name__)
-
-_ANALYSIS_BUTTON = ButtonComponent(
-    action=PostbackAction(label="🔍 分析開始", data="action=llm_analysis"),
-    style="primary",
-    color="#4CAF50",
-    margin="md",
-)
-
-_TOMORROW_PLAN_BUTTON = ButtonComponent(
-    action=PostbackAction(label="🏃 明日のメニューを詳しく", data="action=tomorrow_plan"),
-    style="secondary",
-    margin="sm",
-)
-
-_WEEKLY_TREND_BUTTON = ButtonComponent(
-    action=PostbackAction(label="📊 今週の傾向を見る", data="action=weekly_trend"),
-    style="secondary",
-    margin="sm",
-)
 
 
 class LineClient:
@@ -52,30 +31,6 @@ class LineClient:
             logger.info("LINE 送信完了: %s文字", len(text))
         except Exception as e:
             logger.error("LINE 送信失敗: %s", e)
-            raise
-
-    def _push_with_analysis_button(self, text: str) -> None:
-        """区切り線と「分析開始」ボタンを末尾に付けた Flex Message を送信する。"""
-        bubble = BubbleContainer(
-            body=BoxComponent(
-                layout="vertical",
-                contents=[
-                    TextComponent(
-                        text=text,
-                        wrap=True,
-                        size="sm",
-                    ),
-                    SeparatorComponent(margin="lg"),
-                    _ANALYSIS_BUTTON,
-                ],
-            )
-        )
-        msg = FlexSendMessage(alt_text=text[:60], contents=bubble)
-        try:
-            self._api.push_message(self._user_id, msg)
-            logger.info("LINE Flex 送信完了: %s文字", len(text))
-        except Exception as e:
-            logger.error("LINE Flex 送信失敗: %s", e)
             raise
 
     # ------------------------------------------------------------------
@@ -103,7 +58,7 @@ class LineClient:
             f"深睡眠: {deep}時間 / REM: {rem}時間"
             f"{rest_line}"
         )
-        self._push_with_analysis_button(text)
+        self._push(text)
 
     def send_activity_notification(self, activity: dict, consecutive_exercise_days: int) -> None:
         """アクティビティ検出時の即時通知を送信する。"""
@@ -129,7 +84,7 @@ class LineClient:
             f"消費カロリー: {calories} kcal"
             f"{streak_text}"
         )
-        self._push_with_analysis_button(text)
+        self._push(text)
 
     def send_rest_day_notification(self, consecutive_rest_days: int) -> None:
         """23:00 以降・運動なしの休養日通知を送信する。"""
@@ -147,7 +102,7 @@ class LineClient:
             f"\n"
             f"{comment}"
         )
-        self._push_with_analysis_button(text)
+        self._push(text)
 
     def send_weight_notification(
         self,
@@ -168,7 +123,7 @@ class LineClient:
             f"BMI: {bmi_text}\n"
             f"除脂肪体重: {lean_text}"
         )
-        self._push_with_analysis_button(text)
+        self._push(text)
 
     # ------------------------------------------------------------------
     # Flex Message ヘルパー
@@ -217,13 +172,6 @@ class LineClient:
             for plan in action_plan:
                 body_contents.append(self._make_bullet(plan))
 
-        footer_contents = [
-            _TOMORROW_PLAN_BUTTON,
-            _WEEKLY_TREND_BUTTON,
-            SeparatorComponent(margin="md"),
-            _ANALYSIS_BUTTON,
-        ]
-
         return BubbleContainer(
             header=BoxComponent(
                 layout="vertical",
@@ -241,11 +189,6 @@ class LineClient:
                 layout="vertical",
                 contents=body_contents,
                 padding_all="lg",
-            ),
-            footer=BoxComponent(
-                layout="vertical",
-                contents=footer_contents,
-                padding_all="md",
             ),
         )
 
@@ -297,11 +240,6 @@ class LineClient:
                 layout="vertical",
                 contents=body_contents,
                 padding_all="lg",
-            ),
-            footer=BoxComponent(
-                layout="vertical",
-                contents=[_ANALYSIS_BUTTON],
-                padding_all="md",
             ),
         )
 

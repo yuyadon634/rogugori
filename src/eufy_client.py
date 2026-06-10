@@ -2,11 +2,25 @@
 EufyLife Cloud API から体重・体組成データを取得するクライアント。
 
 認証フロー:
-  - email/password でログインしてアクセストークンを取得
+  - email/password でログインしてアクセストークン・user_id を取得
   - トークンは Sheets の session シートに保存（有効期限 ~30日）
-  - トークン切れ（401）時は自動で再ログイン
+  - トークン切れ（401 または res_code != 1）時は自動で再ログイン
+
+レスポンス構造（reverse engineering 済み・2026 時点）:
+  GET /v1/device/data -> { res_code: 1, data: [ DeviceRecord, ... ] }
+  DeviceRecord = {
+    id, device_id, customer_id, create_time(unix秒), scale_data: {...}, ...
+  }
+  scale_data = {
+    weight(×10 された整数, 例 750=75.0kg), bmi, body_fat, muscle,
+    muscle_mass, bmr, bone_mass, water, body_age, fat_free_weight,
+    heart_rate, height, ...
+  }
+  ※ 計測値はトップレベルではなく scale_data の中にある点に注意。
 
 注意: 非公式 API のため、EufyLife がエンドポイントを変更すると動作しなくなる可能性がある。
+また、EufyLife クラウドはスマホアプリを開いて同期した後にデータが反映される。
+体重計に乗っただけではクラウドに上がらない場合がある。
 """
 
 import json
@@ -23,6 +37,49 @@ _LOGIN_CLIENT_ID = "eufy-app"
 _LOGIN_CLIENT_SECRET = "8FHf22gaTKu7MZXqz5zytw"
 _JST = timezone(timedelta(hours=9))
 
+# 妥当な成人体重の範囲（kg）。スケーリング判定に使用。
+_MIN_PLAUSIBLE_WEIGHT = 20.0
+_MAX_PLAUSIBLE_WEIGHT = 300.0
+
+
+def _to_float(value) -> Optional[float]:
+    """数値に変換できれば float、できなければ None を返す。"""
+    if value is None:
+        return None
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return None
+    return f
+
+
+def _null_if_zero(value) -> Optional[float]:
+    """0 / None / 数値変換不可なら None、それ以外は float を返す。"""
+    f = _to_float(value)
+    if f is None or f == 0:
+        return None
+    return f
+
+
+def _normalize_weight(raw) -> Optional[float]:
+    """
+    scale_data.weight を kg に正規化する。
+    API は体重を 1/10 kg 単位の整数（例: 750 = 75.0kg）で返すことが多いが、
+    将来 float 直値で返す可能性もあるため妥当範囲チェックでフォールバックする。
+    """
+    f = _to_float(raw)
+    if f is None or f == 0:
+        return None
+
+    scaled = f / 10.0
+    if _MIN_PLAUSIBLE_WEIGHT <= scaled <= _MAX_PLAUSIBLE_WEIGHT:
+        return scaled
+    # /10 が非現実的でも、生値が妥当範囲ならそのまま使う
+    if _MIN_PLAUSIBLE_WEIGHT <= f <= _MAX_PLAUSIBLE_WEIGHT:
+        return f
+    # どちらも妥当範囲外: とりあえず /10 を返す（ログで気付けるように）
+    return scaled
+
 
 class EufyClient:
     def __init__(self, email: str, password: str, sheets, height_cm: Optional[float] = None):
@@ -37,6 +94,7 @@ class EufyClient:
         self._sheets = sheets
         self._height_cm = height_cm
         self._access_token: Optional[str] = None
+        self._user_id: Optional[str] = None
         self._request_host: Optional[str] = None
 
     # ------------------------------------------------------------------
@@ -44,11 +102,15 @@ class EufyClient:
     # ------------------------------------------------------------------
 
     def _login(self) -> None:
-        """EufyLife にログインしてアクセストークンを取得・保存する。"""
+        """EufyLife にログインしてアクセストークン・user_id を取得・保存する。"""
         logger.info("EufyLife にログインします")
         resp = requests.post(
             f"{_BASE_URL}/v1/user/v2/email/login",
-            headers={"category": "Health", "Content-Type": "application/json"},
+            headers={
+                "category": "Health",
+                "Content-Type": "application/json",
+                "User-Agent": "EufyLife-iOS-3.3.7",
+            },
             json={
                 "client_id": _LOGIN_CLIENT_ID,
                 "client_secret": _LOGIN_CLIENT_SECRET,
@@ -60,16 +122,22 @@ class EufyClient:
         resp.raise_for_status()
         data = resp.json()
 
+        if data.get("res_code") != 1 or not data.get("access_token"):
+            msg = data.get("message", "不明なエラー")
+            raise RuntimeError(f"EufyLife ログイン失敗: {msg}")
+
         self._access_token = data["access_token"]
+        self._user_id = data.get("user_id") or data.get("user_info", {}).get("id")
         self._request_host = data.get("user_info", {}).get("request_host") or _BASE_URL
 
         token_data = {
             "access_token": self._access_token,
             "refresh_token": data.get("refresh_token"),
+            "user_id": self._user_id,
             "request_host": self._request_host,
         }
         self._sheets.save_eufy_token(json.dumps(token_data))
-        logger.info("EufyLife ログイン成功・トークン保存完了")
+        logger.info("EufyLife ログイン成功・トークン保存完了 (user_id=%s)", self._user_id)
 
     def _init_token(self) -> None:
         """保存済みトークンを読み込む。なければ再ログインする。"""
@@ -81,34 +149,72 @@ class EufyClient:
             try:
                 token_data = json.loads(token_json)
                 self._access_token = token_data["access_token"]
+                self._user_id = token_data.get("user_id")
                 self._request_host = token_data.get("request_host") or _BASE_URL
-                logger.info("保存済み EufyLife トークンを読み込みました")
+                logger.info("保存済み EufyLife トークンを読み込みました (user_id=%s)", self._user_id)
                 return
             except Exception as e:
                 logger.warning("保存済み EufyLife トークンの読み込み失敗: %s", e)
 
         self._login()
 
+    def _auth_headers(self) -> dict:
+        headers = {
+            "token": self._access_token,
+            "User-Agent": "EufyLife-iOS-3.3.7",
+        }
+        if self._user_id:
+            headers["uid"] = self._user_id
+        return headers
+
     def _get(self, path: str, params: Optional[dict] = None) -> dict:
-        """GET リクエストを送信する。401 時は再ログインしてリトライする。"""
+        """
+        GET リクエストを送信する。
+        HTTP 401 または res_code が認証エラーを示す場合は再ログインしてリトライする。
+        """
         self._init_token()
         url = f"{self._request_host}{path}"
-        headers = {"token": self._access_token}
 
-        resp = requests.get(url, headers=headers, params=params, timeout=30)
-        if resp.status_code == 401:
-            logger.warning("EufyLife トークン切れ、再ログインします")
+        resp = requests.get(url, headers=self._auth_headers(), params=params, timeout=30)
+
+        need_relogin = resp.status_code == 401
+        if not need_relogin and resp.status_code == 200:
+            try:
+                body = resp.json()
+                # res_code 1 = 成功。それ以外はエラー（トークン切れ含む）
+                if body.get("res_code") != 1:
+                    logger.warning(
+                        "EufyLife API エラー応答: res_code=%s message=%s",
+                        body.get("res_code"),
+                        body.get("message"),
+                    )
+                    need_relogin = True
+            except ValueError:
+                pass
+
+        if need_relogin:
+            logger.warning("EufyLife トークン切れの可能性、再ログインします")
             self._access_token = None
+            self._user_id = None
             self._login()
-            headers = {"token": self._access_token}
-            resp = requests.get(url, headers=headers, params=params, timeout=30)
+            resp = requests.get(url, headers=self._auth_headers(), params=params, timeout=30)
 
         resp.raise_for_status()
-        return resp.json()
+        body = resp.json()
+        if body.get("res_code") != 1:
+            raise RuntimeError(
+                f"EufyLife API エラー: res_code={body.get('res_code')} "
+                f"message={body.get('message')}"
+            )
+        return body
 
     # ------------------------------------------------------------------
     # データ取得
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _empty_result() -> dict:
+        return {"weight_kg": None, "body_fat_pct": None, "bmi": None, "lean_body_mass_kg": None}
 
     def get_today_body_data(self) -> dict:
         """
@@ -128,55 +234,91 @@ class EufyClient:
             data = self._get("/v1/device/data", params={"after": after_ts})
         except Exception as e:
             logger.warning("EufyLife 体組成データ取得失敗: %s", e)
-            return {"weight_kg": None, "body_fat_pct": None, "bmi": None, "lean_body_mass_kg": None}
+            return self._empty_result()
 
-        records = data.get("data", []) or data.get("records", []) or []
+        records = data.get("data") or data.get("records") or []
         if not records:
-            logger.info("本日の EufyLife データなし")
-            return {"weight_kg": None, "body_fat_pct": None, "bmi": None, "lean_body_mass_kg": None}
+            logger.info("本日の EufyLife データなし（アプリを開いてクラウド同期したか確認）")
+            return self._empty_result()
 
-        # タイムスタンプで降順ソートして最新レコードを取得（API の並び順に依存しない）
+        # create_time（unix秒）降順で最新レコードを取得（API の並び順に依存しない）
         if isinstance(records, list) and len(records) > 1:
-            def _ts(r: dict) -> int:
-                return int(r.get("time") or r.get("timestamp") or r.get("measure_time") or 0)
-            records = sorted(records, key=_ts, reverse=True)
+            records = sorted(records, key=self._record_ts, reverse=True)
         latest = records[0] if isinstance(records, list) else records
 
-        weight = latest.get("weight") or latest.get("weight_kg")
-        body_fat = (
-            latest.get("body_fat")
-            or latest.get("body_fat_pct")
-            or latest.get("bodyfat")
-            or latest.get("body_fat_percentage")
+        # 診断用: 取得したレコードの構造をログ出力（フィールド名ズレの早期発見用）
+        logger.info(
+            "EufyLife レコード取得: %d件 / 最新 create_time=%s customer_id=%s",
+            len(records) if isinstance(records, list) else 1,
+            latest.get("create_time"),
+            latest.get("customer_id"),
         )
-        # BMI: 複数のキー名を試し、それでも取れない場合は身長から計算
-        bmi = (
-            latest.get("bmi")
-            or latest.get("bmi_index")
-            or latest.get("BMI")
-        )
-        if bmi is None and weight and self._height_cm:
-            height_m = self._height_cm / 100
-            bmi = round(weight / (height_m ** 2), 1)
-            logger.info("BMI を身長（%.1f cm）と体重から計算: %.1f", self._height_cm, bmi)
+        scale_data = latest.get("scale_data")
+        if isinstance(scale_data, dict):
+            logger.info("scale_data フィールド: %s", list(scale_data.keys()))
+        else:
+            # scale_data が無い場合は旧構造とみなしレコード自体を計測元にする
+            logger.warning(
+                "scale_data が見つかりません。レコードのキー: %s",
+                list(latest.keys()),
+            )
+            scale_data = latest
 
-        muscle_kg = latest.get("muscle") or latest.get("muscle_kg")
-
-        # muscle_kg が取れない場合は体重×(1-体脂肪率) でフォールバック計算
-        lean_body_mass = muscle_kg
-        if lean_body_mass is None and weight and body_fat:
-            lean_body_mass = round(weight * (1 - body_fat / 100), 1)
+        result = self._parse_scale_data(scale_data)
 
         for label, val, unit in [
-            ("体重", weight, "kg"),
-            ("体脂肪率", body_fat, "%"),
-            ("BMI", bmi, ""),
-            ("除脂肪体重", lean_body_mass, "kg"),
+            ("体重", result["weight_kg"], "kg"),
+            ("体脂肪率", result["body_fat_pct"], "%"),
+            ("BMI", result["bmi"], ""),
+            ("除脂肪体重", result["lean_body_mass_kg"], "kg"),
         ]:
             if val is not None:
                 logger.info("%s取得: %.1f%s", label, val, unit)
             else:
                 logger.info("本日の%sデータなし", label)
+
+        return result
+
+    @staticmethod
+    def _record_ts(r: dict) -> int:
+        for key in ("create_time", "time", "timestamp", "measure_time", "update_time"):
+            v = r.get(key)
+            if v:
+                try:
+                    return int(v)
+                except (TypeError, ValueError):
+                    continue
+        return 0
+
+    def _parse_scale_data(self, sd: dict) -> dict:
+        """scale_data（またはフラットなレコード）から計測値を抽出・正規化する。"""
+        weight = _normalize_weight(sd.get("weight") or sd.get("weight_kg"))
+
+        body_fat = _null_if_zero(
+            sd.get("body_fat")
+            or sd.get("body_fat_pct")
+            or sd.get("bodyfat")
+            or sd.get("body_fat_percentage")
+        )
+
+        bmi = _null_if_zero(sd.get("bmi") or sd.get("bmi_index") or sd.get("BMI"))
+        if bmi is None and weight and self._height_cm:
+            height_m = self._height_cm / 100
+            bmi = round(weight / (height_m ** 2), 1)
+            logger.info("BMI を身長（%.1f cm）と体重から計算: %.1f", self._height_cm, bmi)
+
+        # 除脂肪体重（fat-free mass）= 体重 − 体脂肪量。
+        # 優先順: fat_free_weight 直値 → 体重−body_fat_mass → 体重×(1-体脂肪率)。
+        # ※ muscle_mass は筋肉量のみで除脂肪体重より小さくなるため使わない。
+        lean_body_mass = _null_if_zero(
+            sd.get("fat_free_weight") or sd.get("fat_free_weight_kg")
+        )
+        if lean_body_mass is None and weight:
+            body_fat_mass = _null_if_zero(sd.get("body_fat_mass") or sd.get("body_fat_mass_kg"))
+            if body_fat_mass is not None:
+                lean_body_mass = round(weight - body_fat_mass, 1)
+            elif body_fat:
+                lean_body_mass = round(weight * (1 - body_fat / 100), 1)
 
         return {
             "weight_kg": round(weight, 1) if weight is not None else None,
