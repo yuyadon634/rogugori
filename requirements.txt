@@ -3,7 +3,7 @@ google-auth
 google-auth-oauthlib
 google-api-python-client
 gspread
-google-generativeai
+google-genai
 line-bot-sdk
 python-dotenv
 requests

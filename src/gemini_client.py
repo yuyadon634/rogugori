@@ -8,19 +8,18 @@ import logging
 from pathlib import Path
 from typing import Optional
 
-import google.generativeai as genai
+from google import genai
 
 logger = logging.getLogger(__name__)
 
 CONFIG_PATH = Path(__file__).parent.parent / "config.json"
-MODEL_NAME = "gemini-2.0-flash"
+MODEL_NAME = "gemini-2.5-flash"
 
 
 class GeminiClient:
     def __init__(self, api_key: str, config_path: Path = CONFIG_PATH):
-        genai.configure(api_key=api_key)
+        self._client = genai.Client(api_key=api_key)
         self._config = self._load_config(config_path)
-        self._model = genai.GenerativeModel(MODEL_NAME)
 
     @staticmethod
     def _load_config(config_path: Path) -> dict:
@@ -176,7 +175,10 @@ class GeminiClient:
 
         logger.info("Gemini API にリクエストを送信します（プロンプト: %d文字）", len(full_prompt))
         try:
-            response = self._model.generate_content(full_prompt)
+            response = self._client.models.generate_content(
+                model=MODEL_NAME,
+                contents=full_prompt,
+            )
             result = response.text
             logger.info("Gemini 分析完了（レスポンス: %d文字）", len(result))
             return result
