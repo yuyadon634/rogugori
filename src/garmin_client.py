@@ -38,7 +38,7 @@ class GarminClient:
         logger.info("Garmin に再ログインします")
         client = Garmin(self._email, self._password)
         client.login()
-        session_json = client.dumps()
+        session_json = client.client.dumps()
         self._sheets.save_garmin_session(session_json)
         self._client = client
         logger.info("Garmin ログイン成功・セッション保存完了")
