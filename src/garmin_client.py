@@ -206,6 +206,7 @@ class GarminClient:
             "activity_type": activity.get("activityType", {}).get("typeKey", "unknown"),
             "start_time": activity.get("startTimeLocal", ""),
             "distance_km": distance_km,
+            "duration_min": round(duration_s / 60, 1) if duration_s > 0 else 0,
             "avg_pace": avg_pace,
             "avg_heart_rate": avg_hr,
             "calories": activity.get("calories", 0),

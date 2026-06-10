@@ -349,9 +349,9 @@ def webhook():
 
         elif is_weekly_trend_request(event):
             logger.info("週間傾向リクエストを受信しました")
-            reply_line(reply_token, "📊 今週の傾向を集計中ウホ！少し待ってウホ🦍")
-            trend_text = get_weekly_trend_text()
-            push_line(trend_text)
+            reply_line(reply_token, "📊 今週の傾向をゴリラコーチが分析中ウホ！\n7日分のデータをまとめてるウホ…\n1〜2分後に結果を送るウホ🦍")
+            if not trigger_llm_analysis(mode="weekly_trend"):
+                logger.error("週間傾向ワークフローの起動に失敗しました")
 
         elif is_weight_sync_request(event):
             logger.info("体重即時同期リクエストを受信しました")

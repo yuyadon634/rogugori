@@ -12,9 +12,11 @@ import json
 import logging
 import os
 import sys
-from datetime import date
+from datetime import datetime, timezone, timedelta
 
 from dotenv import load_dotenv
+
+JST = timezone(timedelta(hours=9))
 
 from src.garmin_client import GarminClient
 from src.gemini_client import GeminiClient
@@ -59,7 +61,7 @@ def build_sheets_client(env: dict) -> SheetsClient:
 
 def _fetch_common_data(env: dict, sheets: SheetsClient) -> tuple:
     """当日サマリー・アクティビティ・過去履歴を取得して返す。"""
-    today_str = str(date.today())
+    today_str = str(datetime.now(JST).date())
     today_summary = sheets.get_daily_summary(today_str) or {"date": today_str}
 
     garmin = GarminClient(env["GARMIN_EMAIL"], env["GARMIN_PASSWORD"], sheets)
@@ -116,6 +118,23 @@ def run_tomorrow_plan(env: dict, sheets: SheetsClient) -> None:
     logger.info("翌日プラン送信完了")
 
 
+def run_weekly_trend(env: dict, sheets: SheetsClient) -> None:
+    """直近7日の週間コーチングレポートを生成して LINE に送信する。"""
+    history = sheets.get_recent_summaries(days=7)
+    logger.info("週間傾向分析: 直近 %d 日分のデータを使用", len(history))
+
+    gemini = GeminiClient(env["GEMINI_API_KEY"])
+    trend = gemini.analyze_weekly_trend(history)
+
+    if trend is None:
+        logger.error("Gemini API からの週間傾向生成に失敗しました")
+        sys.exit(1)
+
+    line = LineClient(env["LINE_CHANNEL_ACCESS_TOKEN"], env["LINE_USER_ID"])
+    line.send_weekly_trend_flex(trend)
+    logger.info("週間傾向レポート送信完了")
+
+
 def main() -> None:
     logger.info("===== llm-analysis 開始 =====")
 
@@ -132,6 +151,8 @@ def main() -> None:
 
         if mode == "tomorrow_plan":
             run_tomorrow_plan(env, sheets)
+        elif mode == "weekly_trend":
+            run_weekly_trend(env, sheets)
         else:
             run_default_analysis(env, sheets, force)
 

@@ -1,11 +1,8 @@
 name: llm-analysis
 
 on:
-  schedule:
-    # 毎日 22:00 JST = 13:00 UTC
-    - cron: "0 13 * * *"
   repository_dispatch:
-    # Render.com の Webhook サーバーから手動トリガー
+    # Render.com の Webhook サーバーから手動トリガー（LINE ボタン押下時）
     types: [llm_analysis_trigger]
   workflow_dispatch: # 手動実行用（テスト・デバッグ）
 

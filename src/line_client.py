@@ -148,11 +148,39 @@ class LineClient:
         summary = analysis.get("summary", "")
         good_points = analysis.get("good_points", [])
         issues = analysis.get("issues", [])
+        top_priority = analysis.get("top_priority", "")
         action_plan = analysis.get("action_plan", [])
 
         body_contents = [
             TextComponent(text=summary, wrap=True, size="sm", color="#333333"),
         ]
+
+        if top_priority:
+            body_contents.append(
+                BoxComponent(
+                    layout="vertical",
+                    background_color="#FFF3E0",
+                    corner_radius="6px",
+                    margin="md",
+                    padding_all="sm",
+                    contents=[
+                        TextComponent(
+                            text="🎯 今日の最重要課題",
+                            size="xs",
+                            color="#E65100",
+                            weight="bold",
+                        ),
+                        TextComponent(
+                            text=top_priority,
+                            size="sm",
+                            color="#BF360C",
+                            weight="bold",
+                            wrap=True,
+                            margin="xs",
+                        ),
+                    ],
+                )
+            )
 
         if good_points:
             body_contents.append(SeparatorComponent(margin="lg"))
@@ -243,6 +271,68 @@ class LineClient:
             ),
         )
 
+    def _build_weekly_trend_bubble(self, trend: dict) -> BubbleContainer:
+        """analyze_weekly_trend() の戻り値 dict から BubbleContainer を組み立てる。"""
+        weekly_summary  = trend.get("weekly_summary", "")
+        best            = trend.get("best_performance", "")
+        key_issue       = trend.get("key_issue", "")
+        next_focus      = trend.get("next_week_focus", "")
+        numeric_goal    = trend.get("numeric_goal", "")
+
+        body_contents = [
+            TextComponent(text=weekly_summary, wrap=True, size="sm", color="#333333"),
+        ]
+
+        if best:
+            body_contents.append(SeparatorComponent(margin="lg"))
+            body_contents.append(self._make_section_title("🏆 今週のベスト"))
+            body_contents.append(self._make_bullet(best))
+
+        if key_issue:
+            body_contents.append(
+                BoxComponent(
+                    layout="vertical",
+                    background_color="#FFF3E0",
+                    corner_radius="6px",
+                    margin="md",
+                    padding_all="sm",
+                    contents=[
+                        TextComponent(text="🎯 今週の最重要課題", size="xs", color="#E65100", weight="bold"),
+                        TextComponent(text=key_issue, size="sm", color="#BF360C", weight="bold", wrap=True, margin="xs"),
+                    ],
+                )
+            )
+
+        if next_focus:
+            body_contents.append(SeparatorComponent(margin="lg"))
+            body_contents.append(self._make_section_title("📅 来週の重点テーマ"))
+            body_contents.append(self._make_bullet(next_focus))
+
+        if numeric_goal:
+            body_contents.append(SeparatorComponent(margin="lg"))
+            body_contents.append(self._make_section_title("🎯 来週の数値目標"))
+            body_contents.append(self._make_bullet(numeric_goal))
+
+        return BubbleContainer(
+            header=BoxComponent(
+                layout="vertical",
+                background_color="#4527A0",
+                contents=[
+                    TextComponent(
+                        text="📊 ゴリラコーチ週間レポート",
+                        weight="bold",
+                        size="md",
+                        color="#FFFFFF",
+                    )
+                ],
+            ),
+            body=BoxComponent(
+                layout="vertical",
+                contents=body_contents,
+                padding_all="lg",
+            ),
+        )
+
     # ------------------------------------------------------------------
     # LLM 分析送信
     # ------------------------------------------------------------------
@@ -269,6 +359,8 @@ class LineClient:
             lines = ["🦍 ゴリラコーチからの今日のレビューだウホ！\n"]
             if analysis.get("summary"):
                 lines.append(analysis["summary"])
+            if analysis.get("top_priority"):
+                lines.append(f"\n🎯 最重要課題: {analysis['top_priority']}")
             if analysis.get("good_points"):
                 lines.append("\n✅ 良かった点")
                 lines.extend(f"• {p}" for p in analysis["good_points"])
@@ -278,6 +370,32 @@ class LineClient:
             if analysis.get("action_plan"):
                 lines.append("\n💪 明日のアクションプラン")
                 lines.extend(f"• {a}" for a in analysis["action_plan"])
+            self._push("\n".join(lines))
+
+    def send_weekly_trend_flex(self, trend: dict) -> None:
+        """
+        analyze_weekly_trend() の戻り値 dict を Flex Message で送信する。
+        Flex 組み立て失敗時はプレーンテキストにフォールバックする。
+        """
+        try:
+            bubble = self._build_weekly_trend_bubble(trend)
+            summary = trend.get("weekly_summary", "今週の週間レポート")
+            msg = FlexSendMessage(alt_text=f"📊 ゴリラコーチ週間レポート: {summary[:40]}", contents=bubble)
+            self._api.push_message(self._user_id, msg)
+            logger.info("LINE Flex 週間レポート送信完了")
+        except Exception as e:
+            logger.warning("Flex Message 送信失敗、プレーンテキストにフォールバック: %s", e)
+            lines = ["📊 ゴリラコーチ週間レポートだウホ！\n"]
+            if trend.get("weekly_summary"):
+                lines.append(trend["weekly_summary"])
+            if trend.get("best_performance"):
+                lines.append(f"\n🏆 今週のベスト: {trend['best_performance']}")
+            if trend.get("key_issue"):
+                lines.append(f"🎯 最重要課題: {trend['key_issue']}")
+            if trend.get("next_week_focus"):
+                lines.append(f"\n📅 来週の重点テーマ: {trend['next_week_focus']}")
+            if trend.get("numeric_goal"):
+                lines.append(f"🎯 数値目標: {trend['numeric_goal']}")
             self._push("\n".join(lines))
 
     def send_tomorrow_plan_flex(self, plan: dict) -> None:

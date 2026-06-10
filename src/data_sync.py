@@ -148,6 +148,8 @@ def handle_sleep(
     today_summary.update({
         "sleep_score": sleep.get("sleep_score", ""),
         "sleep_hours": sleep.get("sleep_hours", ""),
+        "deep_sleep_hours": sleep.get("deep_sleep_hours", ""),
+        "rem_sleep_hours": sleep.get("rem_sleep_hours", ""),
     })
     sheets.upsert_daily_summary(today_summary)
     logger.info("睡眠レポート送信完了")
@@ -187,15 +189,19 @@ def handle_activities(
     # daily_summary に集計値を反映
     today_jst = str(datetime.now(JST).date())
     today_summary = sheets.get_daily_summary(today_jst) or {"date": today_jst}
-    avg_hr_values = [
-        a.get("avg_heart_rate", 0) for a in [garmin.format_activity_summary(a) for a in activities_raw]
-        if a.get("avg_heart_rate", 0)
-    ]
+    all_formatted = [garmin.format_activity_summary(a) for a in activities_raw]
+
+    avg_hr_values = [a.get("avg_heart_rate", 0) for a in all_formatted if a.get("avg_heart_rate", 0)]
     avg_hr = round(sum(avg_hr_values) / len(avg_hr_values), 1) if avg_hr_values else ""
+
+    # 最も距離の長いアクティビティのペースを代表値として記録する
+    primary = max(all_formatted, key=lambda a: float(a.get("distance_km", 0) or 0), default=None)
+    avg_pace = primary.get("avg_pace", "") if primary else ""
 
     today_summary.update({
         "total_distance_km": round(total_distance, 2),
         "avg_heart_rate": avg_hr,
+        "avg_pace_per_km": avg_pace,
         "consecutive_exercise_days": ex_streak + 1,
         "consecutive_rest_days": 0,
     })
