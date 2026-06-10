@@ -236,18 +236,22 @@ def handle_weight(
     body_data = fit.get_today_body_data()
     weight = body_data.get("weight_kg")
     body_fat = body_data.get("body_fat_pct")
+    bmi = body_data.get("bmi")
+    lean_body_mass = body_data.get("lean_body_mass_kg")
 
     if weight is None:
         logger.info("本日の体重データなし、スキップします")
         return
 
-    line.send_weight_notification(weight, body_fat)
+    line.send_weight_notification(weight, body_fat, bmi, lean_body_mass)
     sheets.update_status({"weight_sent": True})
 
     today_summary = sheets.get_daily_summary(str(date.today())) or {"date": str(date.today())}
     today_summary.update({
         "weight_kg": weight,
         "body_fat_pct": body_fat if body_fat is not None else "",
+        "bmi": bmi if bmi is not None else "",
+        "lean_body_mass_kg": lean_body_mass if lean_body_mass is not None else "",
     })
     sheets.upsert_daily_summary(today_summary)
     logger.info("体重通知送信完了")

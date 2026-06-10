@@ -31,6 +31,8 @@ DAILY_SUMMARY_HEADERS = [
     "sleep_hours",
     "weight_kg",
     "body_fat_pct",
+    "bmi",
+    "lean_body_mass_kg",
     "consecutive_exercise_days",
     "consecutive_rest_days",
 ]

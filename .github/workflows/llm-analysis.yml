@@ -36,6 +36,8 @@ jobs:
           LINE_USER_ID: ${{ secrets.LINE_USER_ID }}
           GOOGLE_SHEETS_ID: ${{ secrets.GOOGLE_SHEETS_ID }}
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          # LINE ボタン押下時は force=true が渡され、llm_sent フラグを無視して再分析する
+          FORCE_ANALYSIS: ${{ github.event.client_payload.force || 'false' }}
         run: python -m src.analysis
 
       - name: Upload log on failure

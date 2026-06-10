@@ -59,13 +59,19 @@ def build_sheets_client(env: dict) -> SheetsClient:
 
 def main() -> None:
     logger.info("===== llm-analysis 開始 =====")
+
+    # FORCE_ANALYSIS=true のとき llm_sent チェックを無視（手動ボタン押下など）
+    force = os.getenv("FORCE_ANALYSIS", "false").lower() in ("true", "1", "yes")
+    if force:
+        logger.info("FORCE_ANALYSIS が有効です。llm_sent フラグを無視して再分析します。")
+
     try:
         env = load_env()
         sheets = build_sheets_client(env)
 
-        # 重複送信防止チェック
+        # 重複送信防止チェック（手動トリガー時はスキップ）
         status = sheets.get_today_status()
-        if status.get("llm_sent") in (True, "TRUE", "True", 1, "1"):
+        if not force and status.get("llm_sent") in (True, "TRUE", "True", 1, "1"):
             logger.info("本日すでに LLM 分析を送信済みです。スキップします。")
             return
 

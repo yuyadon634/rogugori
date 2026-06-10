@@ -20,9 +20,11 @@ logger = logging.getLogger(__name__)
 
 SCOPES = ["https://www.googleapis.com/auth/fitness.body.read"]
 
-# Google Fit データソース ID
+# Google Fit データソース ID（Eufy スケールが Google Fit へ同期するデータタイプ）
 DATA_SOURCE_WEIGHT = "derived:com.google.weight:com.google.android.gms:merge_weight"
 DATA_SOURCE_BODY_FAT = "derived:com.google.body.fat.percentage:com.google.android.gms:merge_body_fat_percentage"
+DATA_SOURCE_BMI = "derived:com.google.bmi:com.google.android.gms:merge_bmi_summary"
+DATA_SOURCE_LEAN_BODY_MASS = "derived:com.google.lean_body_mass:com.google.android.gms:merge_lean_body_mass"
 
 
 class GoogleFitClient:
@@ -123,23 +125,34 @@ class GoogleFitClient:
 
     def get_today_body_data(self) -> dict:
         """
-        当日の体重（kg）と体脂肪率（%）を返す。
+        当日の体組成データを返す。Eufy スケールが Google Fit に同期した値を含む。
+
+        返却フィールド:
+          weight_kg       : 体重（kg）
+          body_fat_pct    : 体脂肪率（%）
+          bmi             : BMI
+          lean_body_mass_kg: 除脂肪体重（kg）≒ 筋肉量の近似値
         取得できない場合は各フィールドが None。
         """
         weight = self._fetch_latest_data_point(DATA_SOURCE_WEIGHT)
         body_fat = self._fetch_latest_data_point(DATA_SOURCE_BODY_FAT)
+        bmi = self._fetch_latest_data_point(DATA_SOURCE_BMI)
+        lean_body_mass = self._fetch_latest_data_point(DATA_SOURCE_LEAN_BODY_MASS)
 
-        if weight is not None:
-            logger.info("体重取得: %.1f kg", weight)
-        else:
-            logger.info("本日の体重データなし")
-
-        if body_fat is not None:
-            logger.info("体脂肪率取得: %.1f %%", body_fat)
-        else:
-            logger.info("本日の体脂肪データなし")
+        for label, val, unit in [
+            ("体重", weight, "kg"),
+            ("体脂肪率", body_fat, "%"),
+            ("BMI", bmi, ""),
+            ("除脂肪体重", lean_body_mass, "kg"),
+        ]:
+            if val is not None:
+                logger.info("%s取得: %.1f%s", label, val, unit)
+            else:
+                logger.info("本日の%sデータなし", label)
 
         return {
             "weight_kg": round(weight, 1) if weight is not None else None,
             "body_fat_pct": round(body_fat, 1) if body_fat is not None else None,
+            "bmi": round(bmi, 1) if bmi is not None else None,
+            "lean_body_mass_kg": round(lean_body_mass, 1) if lean_body_mass is not None else None,
         }

@@ -7,3 +7,4 @@ google-generativeai
 line-bot-sdk
 python-dotenv
 requests
+Pillow

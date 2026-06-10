@@ -34,9 +34,11 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 
 LINE_CHANNEL_SECRET = os.getenv("LINE_CHANNEL_SECRET", "")
-GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
-GITHUB_REPO = os.getenv("GITHUB_REPO", "")  # 例: "username/rogugori"
+LINE_CHANNEL_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "")
+GITHUB_TOKEN = os.getenv("GH_PAT", "") or os.getenv("GITHUB_TOKEN", "")
+GITHUB_REPO = os.getenv("GH_REPO", "") or os.getenv("GITHUB_REPO", "")  # 例: "username/rogugori"
 
+LINE_REPLY_URL = "https://api.line.me/v2/bot/message/reply"
 ANALYSIS_TRIGGER_TEXTS = {"今日の分析", "分析して", "analyze"}
 ANALYSIS_POSTBACK_DATA = "action=llm_analysis"
 
@@ -61,9 +63,31 @@ def verify_line_signature(body: bytes, signature: str) -> bool:
 # GitHub Actions トリガー
 # ------------------------------------------------------------------
 
+def reply_line(reply_token: str, text: str) -> None:
+    """LINE Reply API でメッセージを即時返信する。"""
+    if not reply_token:
+        return
+    try:
+        requests.post(
+            LINE_REPLY_URL,
+            headers={
+                "Authorization": f"Bearer {LINE_CHANNEL_ACCESS_TOKEN}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "replyToken": reply_token,
+                "messages": [{"type": "text", "text": text}],
+            },
+            timeout=5,
+        )
+    except Exception as e:
+        logger.warning("LINE 返信失敗: %s", e)
+
+
 def trigger_llm_analysis() -> bool:
     """
     GitHub Actions の llm-analysis ワークフローを repository_dispatch で起動する。
+    force=true を渡し、llm_sent フラグに関わらず再分析させる。
     成功時は True、失敗時は False を返す。
     """
     if not GITHUB_TOKEN or not GITHUB_REPO:
@@ -76,7 +100,10 @@ def trigger_llm_analysis() -> bool:
         "Accept": "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
     }
-    payload = {"event_type": "llm_analysis_trigger"}
+    payload = {
+        "event_type": "llm_analysis_trigger",
+        "client_payload": {"force": True},
+    }
 
     try:
         resp = requests.post(url, json=payload, headers=headers, timeout=10)
@@ -138,6 +165,11 @@ def webhook():
     for event in events:
         if is_analysis_request(event):
             logger.info("分析リクエストを受信しました")
+
+            # 押下直後に「分析中」を即時返信（LINE の 5 秒タイムアウト内に応答させるため先に送る）
+            reply_token = event.get("replyToken", "")
+            reply_line(reply_token, "🔍 分析中ウホ！\nGarmin × Eufy × 睡眠を集計中…\n1〜2分後に結果を送るウホ！")
+
             success = trigger_llm_analysis()
             if not success:
                 logger.error("分析ワークフローの起動に失敗しました")

@@ -7,9 +7,25 @@ import logging
 from typing import Optional
 
 from linebot import LineBotApi
-from linebot.models import TextSendMessage
+from linebot.models import (
+    BubbleContainer,
+    BoxComponent,
+    ButtonComponent,
+    FlexSendMessage,
+    PostbackAction,
+    SeparatorComponent,
+    TextComponent,
+    TextSendMessage,
+)
 
 logger = logging.getLogger(__name__)
+
+_ANALYSIS_BUTTON = ButtonComponent(
+    action=PostbackAction(label="🔍 分析開始", data="action=llm_analysis"),
+    style="primary",
+    color="#4CAF50",
+    margin="md",
+)
 
 
 class LineClient:
@@ -24,6 +40,30 @@ class LineClient:
             logger.info("LINE 送信完了: %s文字", len(text))
         except Exception as e:
             logger.error("LINE 送信失敗: %s", e)
+            raise
+
+    def _push_with_analysis_button(self, text: str) -> None:
+        """区切り線と「分析開始」ボタンを末尾に付けた Flex Message を送信する。"""
+        bubble = BubbleContainer(
+            body=BoxComponent(
+                layout="vertical",
+                contents=[
+                    TextComponent(
+                        text=text,
+                        wrap=True,
+                        size="sm",
+                    ),
+                    SeparatorComponent(margin="lg"),
+                    _ANALYSIS_BUTTON,
+                ],
+            )
+        )
+        msg = FlexSendMessage(alt_text=text[:60], contents=bubble)
+        try:
+            self._api.push_message(self._user_id, msg)
+            logger.info("LINE Flex 送信完了: %s文字", len(text))
+        except Exception as e:
+            logger.error("LINE Flex 送信失敗: %s", e)
             raise
 
     # ------------------------------------------------------------------
@@ -51,7 +91,7 @@ class LineClient:
             f"深睡眠: {deep}時間 / REM: {rem}時間"
             f"{rest_line}"
         )
-        self._push(text)
+        self._push_with_analysis_button(text)
 
     def send_activity_notification(self, activity: dict, consecutive_exercise_days: int) -> None:
         """アクティビティ検出時の即時通知を送信する。"""
@@ -77,7 +117,7 @@ class LineClient:
             f"消費カロリー: {calories} kcal"
             f"{streak_text}"
         )
-        self._push(text)
+        self._push_with_analysis_button(text)
 
     def send_rest_day_notification(self, consecutive_rest_days: int) -> None:
         """23:00 以降・運動なしの休養日通知を送信する。"""
@@ -95,18 +135,28 @@ class LineClient:
             f"\n"
             f"{comment}"
         )
-        self._push(text)
+        self._push_with_analysis_button(text)
 
-    def send_weight_notification(self, weight_kg: float, body_fat_pct: Optional[float]) -> None:
+    def send_weight_notification(
+        self,
+        weight_kg: float,
+        body_fat_pct: Optional[float],
+        bmi: Optional[float] = None,
+        lean_body_mass_kg: Optional[float] = None,
+    ) -> None:
         """体重・体脂肪データ検出時の即時通知を送信する。"""
         fat_text = f"{body_fat_pct}%" if body_fat_pct is not None else "計測なし"
+        bmi_text = f"{bmi}" if bmi is not None else "計測なし"
+        lean_text = f"{lean_body_mass_kg} kg" if lean_body_mass_kg is not None else "計測なし"
         text = (
-            f"⚖️ 体重計測データだウホ！\n"
+            f"⚖️ Eufy 体組成データだウホ！\n"
             f"\n"
             f"体重: {weight_kg} kg\n"
-            f"体脂肪率: {fat_text}"
+            f"体脂肪率: {fat_text}\n"
+            f"BMI: {bmi_text}\n"
+            f"除脂肪体重: {lean_text}"
         )
-        self._push(text)
+        self._push_with_analysis_button(text)
 
     def send_llm_analysis(self, analysis_text: str) -> None:
         """LLM による総括分析テキストを送信する。"""
