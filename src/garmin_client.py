@@ -38,8 +38,7 @@ class GarminClient:
         logger.info("Garmin に再ログインします")
         client = Garmin(self._email, self._password)
         client.login()
-        # 新しいバージョンの garminconnect は client.client.dumps() でトークンを取得する
-        session_json = client.client.dumps()
+        session_json = client.dumps()
         self._sheets.save_garmin_session(session_json)
         self._client = client
         logger.info("Garmin ログイン成功・セッション保存完了")
@@ -97,34 +96,46 @@ class GarminClient:
 
         return self._with_session_retry(_fetch)
 
-    def get_yesterday_sleep(self) -> Optional[dict]:
-        """
-        前日の睡眠データを返す（JST基準）。データが存在しない場合は None。
-        """
-        yesterday = str((datetime.now(_JST) - timedelta(days=1)).date())
+    def _fetch_sleep_for_date(self, target_date: str) -> Optional[dict]:
+        """指定日の睡眠データを取得する。未処理・未取得なら None。"""
 
         def _fetch(client: Garmin) -> Optional[dict]:
             try:
-                data = client.get_sleep_data(yesterday)
+                data = client.get_sleep_data(target_date)
                 if not data or "dailySleepDTO" not in data:
-                    logger.info("睡眠データなし: %s", yesterday)
+                    logger.info("睡眠データなし: %s", target_date)
                     return None
                 dto = data["dailySleepDTO"]
                 sleep_seconds = dto.get("sleepTimeSeconds", 0) or 0
                 if sleep_seconds < 1800:
-                    # 30分未満は Garmin の未処理プレースホルダーとみなしてスキップ
                     logger.info(
                         "睡眠データが未処理（sleepTimeSeconds=%d）: %s。次回リトライします",
-                        sleep_seconds, yesterday,
+                        sleep_seconds, target_date,
                     )
                     return None
-                logger.info("睡眠データ取得完了: %s (%.1fh)", yesterday, sleep_seconds / 3600)
+                logger.info(
+                    "睡眠データ取得完了: %s (%.1fh)", target_date, sleep_seconds / 3600
+                )
                 return dto
             except Exception as e:
-                logger.warning("睡眠データ取得失敗: %s", e)
+                logger.warning("睡眠データ取得失敗 (%s): %s", target_date, e)
                 return None
 
         return self._with_session_retry(_fetch)
+
+    def get_last_night_sleep(self) -> Optional[dict]:
+        """
+        昨夜の睡眠データを返す（JST基準）。
+
+        Garmin Connect は睡眠を「起床した日」の日付に紐づける。
+        例: 6/9 夜に寝て 6/10 朝起きた睡眠 → date=2026-06-10 で取得する。
+        """
+        today = str(datetime.now(_JST).date())
+        return self._fetch_sleep_for_date(today)
+
+    def get_yesterday_sleep(self) -> Optional[dict]:
+        """後方互換用。get_last_night_sleep() を呼ぶ。"""
+        return self.get_last_night_sleep()
 
     # ------------------------------------------------------------------
     # データ整形

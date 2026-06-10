@@ -19,8 +19,8 @@ from dotenv import load_dotenv
 
 JST = timezone(timedelta(hours=9))
 
+from src.eufy_client import EufyClient
 from src.garmin_client import GarminClient
-from src.google_fit_client import GoogleFitClient
 from src.line_client import LineClient
 from src.sheets_client import SheetsClient
 
@@ -43,6 +43,8 @@ def load_env() -> dict:
     required = [
         "GARMIN_EMAIL",
         "GARMIN_PASSWORD",
+        "EUFY_EMAIL",
+        "EUFY_PASSWORD",
         "LINE_CHANNEL_ACCESS_TOKEN",
         "LINE_USER_ID",
         "GOOGLE_SHEETS_ID",
@@ -59,51 +61,9 @@ def build_sheets_client(env: dict) -> SheetsClient:
     return SheetsClient(credentials_info, env["GOOGLE_SHEETS_ID"])
 
 
-def build_google_fit_client(sheets: SheetsClient) -> GoogleFitClient | None:
-    """
-    Google Fit クライアントを初期化する。
-    トークン情報は Sheets の session シートから読み込む。
-    リフレッシュ時は Sheets に自動保存する。
-    トークン未設定時は None を返す（体重通知はスキップされる）。
-    """
-    token_raw = _get_fit_token(sheets)
-    credentials_raw = os.getenv("GOOGLE_FIT_CREDENTIALS_JSON", "{}")
-    credentials_info = json.loads(credentials_raw)
-    token_info = json.loads(token_raw) if token_raw else None
-
-    if token_info is None:
-        logger.warning("Google Fit トークン未設定。体重通知をスキップします。初回認証が必要です。")
-        return None
-
-    def on_refresh(new_token: dict) -> None:
-        _save_fit_token(sheets, json.dumps(new_token))
-
-    try:
-        return GoogleFitClient(credentials_info, token_info, on_token_refresh=on_refresh)
-    except Exception as e:
-        logger.warning("Google Fit クライアント初期化失敗: %s", e)
-        return None
-
-
-def _get_fit_token(sheets: SheetsClient) -> str | None:
-    """session シートから Google Fit トークンを取得する。"""
-    records = sheets._session_ws.get_all_records()
-    for row in records:
-        if row.get("key") == "google_fit_token":
-            v = row.get("value", "")
-            return v if v else None
-    return None
-
-
-def _save_fit_token(sheets: SheetsClient, token_json: str) -> None:
-    """session シートに Google Fit トークンを保存する。"""
-    records = sheets._session_ws.get_all_records()
-    for i, row in enumerate(records):
-        if row.get("key") == "google_fit_token":
-            row_index = i + 2
-            sheets._session_ws.update(f"A{row_index}", [["google_fit_token", token_json]])
-            return
-    sheets._session_ws.append_row(["google_fit_token", token_json])
+def build_eufy_client(env: dict, sheets: SheetsClient) -> EufyClient:
+    """EufyClient を初期化する。トークンは Sheets の session シートで管理される。"""
+    return EufyClient(env["EUFY_EMAIL"], env["EUFY_PASSWORD"], sheets)
 
 
 def calc_streaks(sheets: SheetsClient) -> tuple[int, int]:
@@ -162,7 +122,7 @@ def handle_sleep(
     if status.get("sleep_sent") in (True, "TRUE", "True", 1, "1"):
         return
 
-    sleep_raw = garmin.get_yesterday_sleep()
+    sleep_raw = garmin.get_last_night_sleep()
     if sleep_raw is None:
         logger.info("睡眠データが取得できなかったため睡眠レポートをスキップします")
         return
@@ -233,7 +193,7 @@ def handle_activities(
 
 
 def handle_weight(
-    fit: GoogleFitClient,
+    eufy: EufyClient,
     line: LineClient,
     sheets: SheetsClient,
     status: dict,
@@ -242,7 +202,7 @@ def handle_weight(
     if status.get("weight_sent") in (True, "TRUE", "True", 1, "1"):
         return
 
-    body_data = fit.get_today_body_data()
+    body_data = eufy.get_today_body_data()
     weight = body_data.get("weight_kg")
     body_fat = body_data.get("body_fat_pct")
     bmi = body_data.get("bmi")
@@ -311,7 +271,7 @@ def main() -> None:
         env = load_env()
         sheets = build_sheets_client(env)
         garmin = GarminClient(env["GARMIN_EMAIL"], env["GARMIN_PASSWORD"], sheets)
-        fit = build_google_fit_client(sheets)
+        eufy = build_eufy_client(env, sheets)
         line = LineClient(env["LINE_CHANNEL_ACCESS_TOKEN"], env["LINE_USER_ID"])
 
         status = sheets.get_today_status()
@@ -321,9 +281,8 @@ def main() -> None:
         status = sheets.get_today_status()
         handle_activities(garmin, line, sheets, status)
         status = sheets.get_today_status()
-        if fit is not None:
-            handle_weight(fit, line, sheets, status)
-            status = sheets.get_today_status()
+        handle_weight(eufy, line, sheets, status)
+        status = sheets.get_today_status()
         handle_rest_day(line, sheets, status)
 
     except Exception as e:
