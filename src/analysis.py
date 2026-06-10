@@ -113,6 +113,21 @@ def main() -> None:
 
     except Exception as e:
         logger.exception("llm-analysis で予期せぬエラーが発生しました: %s", e)
+        # エラー内容を LINE に通知して、ユーザーが無限に待ち続けないようにする
+        try:
+            token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "")
+            user_id = os.getenv("LINE_USER_ID", "")
+            if token and user_id:
+                error_line = LineClient(token, user_id)
+                error_line._push(
+                    f"⚠️ 分析中にエラーが発生したウホ…\n"
+                    f"\n"
+                    f"原因: {str(e)[:120]}\n"
+                    f"\n"
+                    f"しばらく待ってからもう一度「分析して」と送ってみてウホ🦍"
+                )
+        except Exception as notify_err:
+            logger.error("エラー通知の LINE 送信にも失敗: %s", notify_err)
         sys.exit(1)
     finally:
         logger.info("===== llm-analysis 終了 =====")
