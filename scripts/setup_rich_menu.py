@@ -9,10 +9,10 @@ LINE リッチメニューを登録するセットアップスクリプト。
   python scripts/setup_rich_menu.py
 
 メニューレイアウト (2500 x 843 px):
-  ┌────────────────────────┬──────────────────────┐
-  │   🔍 分析開始           │  📋 今日のデータ確認   │
-  │  (Postback トリガー)   │  (テキスト送信)        │
-  └────────────────────────┴──────────────────────┘
+  ┌──────────────────┬──────────────────┬──────────────────┐
+  │   🔍 分析開始     │ 🏃 明日のメニュー  │  📊 今週の傾向    │
+  │  (Postback)      │  (Postback)      │  (Postback)      │
+  └──────────────────┴──────────────────┴──────────────────┘
 """
 
 import os
@@ -49,15 +49,18 @@ BASE_URL = "https://api.line.me"
 
 # リッチメニューの寸法
 W, H = 2500, 843
-DIVIDER_X = 1500  # 左60% / 右40% の分割ライン
+COL_W = W // 3        # 3等分: 各列 833px（端数は右列に吸収）
+COL1_X = 0
+COL2_X = COL_W
+COL3_X = COL_W * 2
 
 # カラーパレット
 COLOR_BG = (30, 30, 30)           # ダークグレー背景
-COLOR_LEFT = (46, 125, 50)        # 濃い緑（分析開始）
-COLOR_RIGHT = (25, 118, 210)      # 青（データ確認）
+COLOR_COL1 = (46, 125, 50)        # 濃い緑（分析開始）
+COLOR_COL2 = (21, 101, 192)       # 濃い青（明日のメニュー）
+COLOR_COL3 = (106, 27, 154)       # 紫（今週の傾向）
 COLOR_DIVIDER = (255, 255, 255)   # 白い区切り線
 COLOR_TEXT = (255, 255, 255)      # 白テキスト
-COLOR_ICON_BG = (0, 0, 0, 60)    # アイコン背景（半透明）
 
 # リッチメニュー JSON 定義
 RICH_MENU_PAYLOAD = {
@@ -67,7 +70,7 @@ RICH_MENU_PAYLOAD = {
     "chatBarText": "🦍 ゴリラコーチ",
     "areas": [
         {
-            "bounds": {"x": 0, "y": 0, "width": DIVIDER_X, "height": H},
+            "bounds": {"x": COL1_X, "y": 0, "width": COL_W, "height": H},
             "action": {
                 "type": "postback",
                 "label": "分析開始",
@@ -76,11 +79,21 @@ RICH_MENU_PAYLOAD = {
             },
         },
         {
-            "bounds": {"x": DIVIDER_X, "y": 0, "width": W - DIVIDER_X, "height": H},
+            "bounds": {"x": COL2_X, "y": 0, "width": COL_W, "height": H},
             "action": {
-                "type": "message",
-                "label": "今日のデータ確認",
-                "text": "今日の分析",
+                "type": "postback",
+                "label": "明日のメニューを詳しく",
+                "data": "action=tomorrow_plan",
+                "displayText": "🏃 明日のメニューを詳しく！",
+            },
+        },
+        {
+            "bounds": {"x": COL3_X, "y": 0, "width": W - COL3_X, "height": H},
+            "action": {
+                "type": "postback",
+                "label": "今週の傾向を見る",
+                "data": "action=weekly_trend",
+                "displayText": "📊 今週の傾向を見る！",
             },
         },
     ],
@@ -137,22 +150,30 @@ def generate_rich_menu_image() -> bytes:
     img = Image.new("RGB", (W, H), color=COLOR_BG)
     draw = ImageDraw.Draw(img)
 
-    # 左ボタン: 分析開始
+    # 列1: 分析開始（緑）
     _draw_button(
-        draw, 0, 0, DIVIDER_X - 2, H,
-        COLOR_LEFT,
-        "🔍", "分析開始", "Garmin × Eufy × 睡眠 を総括",
+        draw, COL1_X, 0, COL2_X - 2, H,
+        COLOR_COL1,
+        "🔍", "分析開始", "今日の全データを総括",
     )
 
-    # 右ボタン: 今日のデータ確認
+    # 列2: 明日のメニューを詳しく（青）
     _draw_button(
-        draw, DIVIDER_X + 2, 0, W, H,
-        COLOR_RIGHT,
-        "📊", "今日のデータ確認", "「今日の分析」をテキストで送信",
+        draw, COL2_X + 2, 0, COL3_X - 2, H,
+        COLOR_COL2,
+        "🏃", "明日のメニュー", "翌日のトレーニング計画",
     )
 
-    # 区切り線
-    draw.rectangle([DIVIDER_X - 2, 0, DIVIDER_X + 2, H], fill=COLOR_DIVIDER)
+    # 列3: 今週の傾向を見る（紫）
+    _draw_button(
+        draw, COL3_X + 2, 0, W, H,
+        COLOR_COL3,
+        "📊", "今週の傾向", "直近7日の運動・体重・睡眠",
+    )
+
+    # 区切り線（列1-2 間 / 列2-3 間）
+    draw.rectangle([COL2_X - 2, 0, COL2_X + 2, H], fill=COLOR_DIVIDER)
+    draw.rectangle([COL3_X - 2, 0, COL3_X + 2, H], fill=COLOR_DIVIDER)
 
     buf = BytesIO()
     img.save(buf, format="PNG")
