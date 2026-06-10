@@ -66,7 +66,14 @@ def build_eufy_client(env: dict, sheets: SheetsClient) -> EufyClient | None:
     if not email or not password:
         logger.warning("EufyLife 認証情報未設定。体重通知をスキップします。")
         return None
-    return EufyClient(email, password, sheets)
+    height_raw = env.get("EUFY_HEIGHT_CM") or os.getenv("EUFY_HEIGHT_CM")
+    height_cm: float | None = None
+    if height_raw:
+        try:
+            height_cm = float(height_raw)
+        except ValueError:
+            logger.warning("EUFY_HEIGHT_CM の値が不正です（%s）。BMI 計算フォールバックを無効化します。", height_raw)
+    return EufyClient(email, password, sheets, height_cm=height_cm)
 
 
 def calc_streaks(sheets: SheetsClient) -> tuple[int, int]:

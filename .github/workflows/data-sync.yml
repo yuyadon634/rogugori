@@ -2,9 +2,11 @@ name: data-sync
 
 on:
   schedule:
-    # JST 4〜11時に毎時0分実行（UTC 19〜02時）
+    # JST 4〜23時に毎時0分実行（UTC 19〜14時）
+    # JST 4〜8時 = UTC 19〜23時
     - cron: "0 19-23 * * *"
-    - cron: "0 0-2 * * *"
+    # JST 9〜23時 = UTC 0〜14時
+    - cron: "0 0-14 * * *"
   workflow_dispatch:
     inputs:
       force_sleep:

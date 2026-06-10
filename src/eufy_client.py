@@ -25,15 +25,17 @@ _JST = timezone(timedelta(hours=9))
 
 
 class EufyClient:
-    def __init__(self, email: str, password: str, sheets):
+    def __init__(self, email: str, password: str, sheets, height_cm: Optional[float] = None):
         """
-        email    : EufyLife アカウントのメールアドレス
-        password : EufyLife アカウントのパスワード
-        sheets   : SheetsClient インスタンス（トークンの保存・読み込みに使用）
+        email     : EufyLife アカウントのメールアドレス
+        password  : EufyLife アカウントのパスワード
+        sheets    : SheetsClient インスタンス（トークンの保存・読み込みに使用）
+        height_cm : 身長（cm）。BMI が API から取得できない場合の計算に使用
         """
         self._email = email
         self._password = password
         self._sheets = sheets
+        self._height_cm = height_cm
         self._access_token: Optional[str] = None
         self._request_host: Optional[str] = None
 
@@ -133,15 +135,31 @@ class EufyClient:
             logger.info("本日の EufyLife データなし")
             return {"weight_kg": None, "body_fat_pct": None, "bmi": None, "lean_body_mass_kg": None}
 
-        latest = records[-1] if isinstance(records, list) else records
+        # タイムスタンプで降順ソートして最新レコードを取得（API の並び順に依存しない）
+        if isinstance(records, list) and len(records) > 1:
+            def _ts(r: dict) -> int:
+                return int(r.get("time") or r.get("timestamp") or r.get("measure_time") or 0)
+            records = sorted(records, key=_ts, reverse=True)
+        latest = records[0] if isinstance(records, list) else records
 
         weight = latest.get("weight") or latest.get("weight_kg")
         body_fat = (
             latest.get("body_fat")
             or latest.get("body_fat_pct")
             or latest.get("bodyfat")
+            or latest.get("body_fat_percentage")
         )
-        bmi = latest.get("bmi")
+        # BMI: 複数のキー名を試し、それでも取れない場合は身長から計算
+        bmi = (
+            latest.get("bmi")
+            or latest.get("bmi_index")
+            or latest.get("BMI")
+        )
+        if bmi is None and weight and self._height_cm:
+            height_m = self._height_cm / 100
+            bmi = round(weight / (height_m ** 2), 1)
+            logger.info("BMI を身長（%.1f cm）と体重から計算: %.1f", self._height_cm, bmi)
+
         muscle_kg = latest.get("muscle") or latest.get("muscle_kg")
 
         # muscle_kg が取れない場合は体重×(1-体脂肪率) でフォールバック計算
