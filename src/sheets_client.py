@@ -3,7 +3,7 @@ Google Sheets を使ったデータ永続化層。
 3つのシートを管理する:
   - daily_summary : 日次の健康データ（30日分の履歴）
   - status        : 当日の通知送信状態管理
-  - session       : Garmin セッションクッキーの保存
+  - session       : Garmin セッション・Eufy トークンの保存
 """
 
 import json
@@ -205,3 +205,28 @@ class SheetsClient:
                 return
         self._session_ws.append_row(["garmin_session", session_json])
         logger.debug("Garmin セッションを新規保存しました")
+
+    # ------------------------------------------------------------------
+    # session (Eufy トークン)
+    # ------------------------------------------------------------------
+
+    def get_eufy_token(self) -> Optional[str]:
+        """保存済みの EufyLife トークン JSON 文字列を返す。なければ None。"""
+        records = self._session_ws.get_all_records(expected_headers=["key", "value"])
+        for row in records:
+            if row.get("key") == "eufy_token":
+                v = row.get("value", "")
+                return v if v else None
+        return None
+
+    def save_eufy_token(self, token_json: str) -> None:
+        """EufyLife トークン JSON 文字列を保存（上書き）する。"""
+        records = self._session_ws.get_all_records(expected_headers=["key", "value"])
+        for i, row in enumerate(records):
+            if row.get("key") == "eufy_token":
+                row_index = i + 2
+                self._session_ws.update(f"A{row_index}", [["eufy_token", token_json]])
+                logger.debug("EufyLife トークンを更新しました")
+                return
+        self._session_ws.append_row(["eufy_token", token_json])
+        logger.debug("EufyLife トークンを新規保存しました")

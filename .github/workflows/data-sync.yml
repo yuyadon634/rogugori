@@ -38,8 +38,8 @@ jobs:
           LINE_USER_ID: ${{ secrets.LINE_USER_ID }}
           GOOGLE_SHEETS_ID: ${{ secrets.GOOGLE_SHEETS_ID }}
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
-          GOOGLE_FIT_CREDENTIALS_JSON: ${{ secrets.GOOGLE_FIT_CREDENTIALS_JSON }}
-          GOOGLE_FIT_TOKEN_JSON: ${{ secrets.GOOGLE_FIT_TOKEN_JSON }}
+          EUFY_EMAIL: ${{ secrets.EUFY_EMAIL }}
+          EUFY_PASSWORD: ${{ secrets.EUFY_PASSWORD }}
           FORCE_SLEEP: ${{ github.event.inputs.force_sleep }}
         run: python -m src.data_sync
 

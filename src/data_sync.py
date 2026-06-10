@@ -43,8 +43,6 @@ def load_env() -> dict:
     required = [
         "GARMIN_EMAIL",
         "GARMIN_PASSWORD",
-        "EUFY_EMAIL",
-        "EUFY_PASSWORD",
         "LINE_CHANNEL_ACCESS_TOKEN",
         "LINE_USER_ID",
         "GOOGLE_SHEETS_ID",
@@ -61,9 +59,14 @@ def build_sheets_client(env: dict) -> SheetsClient:
     return SheetsClient(credentials_info, env["GOOGLE_SHEETS_ID"])
 
 
-def build_eufy_client(env: dict, sheets: SheetsClient) -> EufyClient:
-    """EufyClient を初期化する。トークンは Sheets の session シートで管理される。"""
-    return EufyClient(env["EUFY_EMAIL"], env["EUFY_PASSWORD"], sheets)
+def build_eufy_client(env: dict, sheets: SheetsClient) -> EufyClient | None:
+    """EufyClient を初期化する。認証情報未設定時は None（体重通知をスキップ）。"""
+    email = env.get("EUFY_EMAIL") or os.getenv("EUFY_EMAIL")
+    password = env.get("EUFY_PASSWORD") or os.getenv("EUFY_PASSWORD")
+    if not email or not password:
+        logger.warning("EufyLife 認証情報未設定。体重通知をスキップします。")
+        return None
+    return EufyClient(email, password, sheets)
 
 
 def calc_streaks(sheets: SheetsClient) -> tuple[int, int]:
@@ -281,7 +284,8 @@ def main() -> None:
         status = sheets.get_today_status()
         handle_activities(garmin, line, sheets, status)
         status = sheets.get_today_status()
-        handle_weight(eufy, line, sheets, status)
+        if eufy is not None:
+            handle_weight(eufy, line, sheets, status)
         status = sheets.get_today_status()
         handle_rest_day(line, sheets, status)
 
