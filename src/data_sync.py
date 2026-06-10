@@ -13,9 +13,11 @@ import json
 import logging
 import os
 import sys
-from datetime import date, datetime
+from datetime import datetime, timezone, timedelta
 
 from dotenv import load_dotenv
+
+JST = timezone(timedelta(hours=9))
 
 from src.garmin_client import GarminClient
 from src.google_fit_client import GoogleFitClient
@@ -110,7 +112,7 @@ def calc_streaks(sheets: SheetsClient) -> tuple[int, int]:
     Returns: (consecutive_exercise_days, consecutive_rest_days)
     """
     summaries = sheets.get_recent_summaries(days=30)
-    today_str = str(date.today())
+    today_str = str(datetime.now(JST).date())
 
     exercise_streak = 0
     rest_streak = 0
@@ -148,10 +150,15 @@ def handle_sleep(
     sheets: SheetsClient,
     status: dict,
 ) -> None:
-    """06:00〜08:00 に睡眠レポートを1回送信する。"""
-    now_hour = datetime.now().hour
-    if not (6 <= now_hour < 8):
-        return
+    """JST 04:00〜11:59 に睡眠レポートを1回送信する。
+    FORCE_SLEEP=true の場合は時間窓チェックをスキップする。
+    """
+    force = os.getenv("FORCE_SLEEP", "false").lower() == "true"
+    if not force:
+        now_jst = datetime.now(JST)
+        if not (4 <= now_jst.hour < 12):
+            logger.info("睡眠レポートの時間窓外（JST %d時）のためスキップします", now_jst.hour)
+            return
     if status.get("sleep_sent") in (True, "TRUE", "True", 1, "1"):
         return
 
@@ -166,7 +173,8 @@ def handle_sleep(
     sheets.update_status({"sleep_sent": True})
 
     # daily_summary に睡眠データを反映
-    today_summary = sheets.get_daily_summary(str(date.today())) or {"date": str(date.today())}
+    today_jst = str(datetime.now(JST).date())
+    today_summary = sheets.get_daily_summary(today_jst) or {"date": today_jst}
     today_summary.update({
         "sleep_score": sleep.get("sleep_score", ""),
         "sleep_hours": sleep.get("sleep_hours", ""),
@@ -207,7 +215,8 @@ def handle_activities(
         logger.info("アクティビティ通知送信: %s", activity["activity_id"])
 
     # daily_summary に集計値を反映
-    today_summary = sheets.get_daily_summary(str(date.today())) or {"date": str(date.today())}
+    today_jst = str(datetime.now(JST).date())
+    today_summary = sheets.get_daily_summary(today_jst) or {"date": today_jst}
     avg_hr_values = [
         a.get("avg_heart_rate", 0) for a in [garmin.format_activity_summary(a) for a in activities_raw]
         if a.get("avg_heart_rate", 0)
@@ -246,7 +255,8 @@ def handle_weight(
     line.send_weight_notification(weight, body_fat, bmi, lean_body_mass)
     sheets.update_status({"weight_sent": True})
 
-    today_summary = sheets.get_daily_summary(str(date.today())) or {"date": str(date.today())}
+    today_jst = str(datetime.now(JST).date())
+    today_summary = sheets.get_daily_summary(today_jst) or {"date": today_jst}
     today_summary.update({
         "weight_kg": weight,
         "body_fat_pct": body_fat if body_fat is not None else "",
@@ -262,8 +272,8 @@ def handle_rest_day(
     sheets: SheetsClient,
     status: dict,
 ) -> None:
-    """23:00以降・当日アクティビティなし・未通知の場合に休養日通知を送信する。"""
-    now_hour = datetime.now().hour
+    """JST 23:00以降・当日アクティビティなし・未通知の場合に休養日通知を送信する。"""
+    now_hour = datetime.now(JST).hour
     if now_hour < 23:
         return
     if status.get("rest_day_sent") in (True, "TRUE", "True", 1, "1"):
@@ -280,7 +290,8 @@ def handle_rest_day(
     line.send_rest_day_notification(rest_streak)
     sheets.update_status({"rest_day_sent": True})
 
-    today_summary = sheets.get_daily_summary(str(date.today())) or {"date": str(date.today())}
+    today_jst = str(datetime.now(JST).date())
+    today_summary = sheets.get_daily_summary(today_jst) or {"date": today_jst}
     today_summary.update({
         "total_distance_km": 0,
         "consecutive_exercise_days": 0,

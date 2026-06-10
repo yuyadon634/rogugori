@@ -10,8 +10,10 @@ Garmin Connect からデータを取得するクライアント。
 
 import json
 import logging
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional
+
+_JST = timezone(timedelta(hours=9))
 
 from garminconnect import Garmin, GarminConnectAuthenticationError
 
@@ -86,7 +88,7 @@ class GarminClient:
         当日のアクティビティ一覧を返す。
         運動ゼロの日は空リストを返す（エラーではない）。
         """
-        today = str(date.today())
+        today = str(datetime.now(_JST).date())
 
         def _fetch(client: Garmin) -> list[dict]:
             activities = client.get_activities_by_date(today, today)
@@ -97,9 +99,9 @@ class GarminClient:
 
     def get_yesterday_sleep(self) -> Optional[dict]:
         """
-        前日の睡眠データを返す。データが存在しない場合は None。
+        前日の睡眠データを返す（JST基準）。データが存在しない場合は None。
         """
-        yesterday = str(date.today() - timedelta(days=1))
+        yesterday = str((datetime.now(_JST) - timedelta(days=1)).date())
 
         def _fetch(client: Garmin) -> Optional[dict]:
             try:

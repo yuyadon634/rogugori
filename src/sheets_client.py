@@ -8,8 +8,10 @@ Google Sheets を使ったデータ永続化層。
 
 import json
 import logging
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
+
+_JST = timezone(timedelta(hours=9))
 
 import gspread
 from google.oauth2.service_account import Credentials
@@ -94,7 +96,7 @@ class SheetsClient:
         当日の daily_summary 行を更新（なければ追記）する。
         data には DAILY_SUMMARY_HEADERS のキーを含む dict を渡す。
         """
-        today = data.get("date", str(date.today()))
+        today = data.get("date", str(datetime.now(_JST).date()))
         records = self._daily_ws.get_all_records()
         for i, row in enumerate(records):
             if row.get("date") == today:
@@ -116,7 +118,7 @@ class SheetsClient:
 
     def get_recent_summaries(self, days: int = 30) -> list[dict]:
         """過去 days 日分の daily_summary を日付昇順で返す"""
-        cutoff = date.today() - timedelta(days=days)
+        cutoff = datetime.now(_JST).date() - timedelta(days=days)
         records = self._daily_ws.get_all_records()
         result = []
         for row in records:
@@ -133,8 +135,8 @@ class SheetsClient:
     # ------------------------------------------------------------------
 
     def get_today_status(self) -> dict:
-        """当日の status 行を返す。存在しない場合は初期値で新規作成する。"""
-        today = str(date.today())
+        """当日の status 行を返す（JST基準）。存在しない場合は初期値で新規作成する。"""
+        today = str(datetime.now(_JST).date())
         records = self._status_ws.get_all_records(expected_headers=STATUS_HEADERS)
         for row in records:
             if row.get("date") == today:
@@ -152,8 +154,8 @@ class SheetsClient:
         return initial
 
     def update_status(self, updates: dict) -> None:
-        """当日の status 行の指定フィールドを更新する。"""
-        today = str(date.today())
+        """当日の status 行の指定フィールドを更新する（JST基準）。"""
+        today = str(datetime.now(_JST).date())
         records = self._status_ws.get_all_records(expected_headers=STATUS_HEADERS)
         for i, row in enumerate(records):
             if row.get("date") == today:
