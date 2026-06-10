@@ -17,6 +17,8 @@ on:
         description: "weight_sent フラグを無視して体重データを強制再取得する (true/false)"
         required: false
         default: "false"
+  repository_dispatch:
+    types: [data_sync_trigger]
 
 jobs:
   sync:
@@ -46,8 +48,8 @@ jobs:
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           EUFY_EMAIL: ${{ secrets.EUFY_EMAIL }}
           EUFY_PASSWORD: ${{ secrets.EUFY_PASSWORD }}
-          FORCE_SLEEP: ${{ github.event.inputs.force_sleep }}
-          FORCE_WEIGHT: ${{ github.event.inputs.force_weight }}
+          FORCE_SLEEP: ${{ github.event.inputs.force_sleep || github.event.client_payload.force_sleep }}
+          FORCE_WEIGHT: ${{ github.event.inputs.force_weight || github.event.client_payload.force_weight }}
         run: python -m src.data_sync
 
       - name: Upload log on failure

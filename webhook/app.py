@@ -100,7 +100,8 @@ def reply_line(reply_token: str, text: str) -> None:
 
 def trigger_data_sync(force_weight: bool = True) -> bool:
     """
-    GitHub Actions の data-sync ワークフローを workflow_dispatch で即時起動する。
+    GitHub Actions の data-sync ワークフローを repository_dispatch で即時起動する。
+    repository_dispatch は repo スコープの PAT で動作し、workflow スコープは不要。
     force_weight=True の場合、weight_sent フラグを無視して体重データを強制再取得する。
     成功時は True、失敗時は False を返す。
     """
@@ -108,15 +109,15 @@ def trigger_data_sync(force_weight: bool = True) -> bool:
         logger.error("GITHUB_TOKEN または GITHUB_REPO が未設定です")
         return False
 
-    url = f"https://api.github.com/repos/{GITHUB_REPO}/actions/workflows/data-sync.yml/dispatches"
+    url = f"https://api.github.com/repos/{GITHUB_REPO}/dispatches"
     headers = {
         "Authorization": f"Bearer {GITHUB_TOKEN}",
         "Accept": "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
     }
     payload = {
-        "ref": "main",
-        "inputs": {
+        "event_type": "data_sync_trigger",
+        "client_payload": {
             "force_weight": "true" if force_weight else "false",
         },
     }
