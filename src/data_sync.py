@@ -208,8 +208,11 @@ def handle_weight(
     sheets: SheetsClient,
     status: dict,
 ) -> None:
-    """体重データを検出して即時通知する。"""
-    if status.get("weight_sent") in (True, "TRUE", "True", 1, "1"):
+    """体重データを検出して即時通知する。
+    FORCE_WEIGHT=true の場合は weight_sent フラグを無視して再取得する。
+    """
+    force = os.getenv("FORCE_WEIGHT", "false").lower() == "true"
+    if not force and status.get("weight_sent") in (True, "TRUE", "True", 1, "1"):
         return
 
     body_data = eufy.get_today_body_data()

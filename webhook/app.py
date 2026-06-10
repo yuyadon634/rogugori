@@ -50,9 +50,11 @@ GOOGLE_SERVICE_ACCOUNT_JSON = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "")
 LINE_REPLY_URL = "https://api.line.me/v2/bot/message/reply"
 LINE_PUSH_URL = "https://api.line.me/v2/bot/message/push"
 ANALYSIS_TRIGGER_TEXTS = {"今日の分析", "分析して", "analyze"}
+WEIGHT_SYNC_TRIGGER_TEXTS = {"体重", "体重同期", "weight", "sync"}
 ANALYSIS_POSTBACK_DATA = "action=llm_analysis"
 TOMORROW_PLAN_POSTBACK_DATA = "action=tomorrow_plan"
 WEEKLY_TREND_POSTBACK_DATA = "action=weekly_trend"
+WEIGHT_SYNC_POSTBACK_DATA = "action=weight_sync"
 
 
 # ------------------------------------------------------------------
@@ -94,6 +96,46 @@ def reply_line(reply_token: str, text: str) -> None:
         )
     except Exception as e:
         logger.warning("LINE 返信失敗: %s", e)
+
+
+def trigger_data_sync(force_weight: bool = True) -> bool:
+    """
+    GitHub Actions の data-sync ワークフローを workflow_dispatch で即時起動する。
+    force_weight=True の場合、weight_sent フラグを無視して体重データを強制再取得する。
+    成功時は True、失敗時は False を返す。
+    """
+    if not GITHUB_TOKEN or not GITHUB_REPO:
+        logger.error("GITHUB_TOKEN または GITHUB_REPO が未設定です")
+        return False
+
+    url = f"https://api.github.com/repos/{GITHUB_REPO}/actions/workflows/data-sync.yml/dispatches"
+    headers = {
+        "Authorization": f"Bearer {GITHUB_TOKEN}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    payload = {
+        "ref": "main",
+        "inputs": {
+            "force_weight": "true" if force_weight else "false",
+        },
+    }
+
+    try:
+        resp = requests.post(url, json=payload, headers=headers, timeout=10)
+        if resp.status_code == 204:
+            logger.info("GitHub Actions data-sync ワークフローを起動しました (force_weight=%s)", force_weight)
+            return True
+        else:
+            logger.error(
+                "GitHub Actions data-sync 起動失敗: status=%d body=%s",
+                resp.status_code,
+                resp.text,
+            )
+            return False
+    except requests.RequestException as e:
+        logger.error("GitHub Actions へのリクエストエラー: %s", e)
+        return False
 
 
 def trigger_llm_analysis(mode: str = "default") -> bool:
@@ -257,6 +299,18 @@ def is_weekly_trend_request(event: dict) -> bool:
     )
 
 
+def is_weight_sync_request(event: dict) -> bool:
+    """イベントが体重即時同期リクエストかどうかを判定する。"""
+    event_type = event.get("type")
+    if event_type == "postback":
+        return _get_postback_data(event) == WEIGHT_SYNC_POSTBACK_DATA
+    if event_type == "message":
+        msg = event.get("message", {})
+        if msg.get("type") == "text":
+            return msg.get("text", "").strip() in WEIGHT_SYNC_TRIGGER_TEXTS
+    return False
+
+
 # ------------------------------------------------------------------
 # Flask エンドポイント
 # ------------------------------------------------------------------
@@ -297,6 +351,12 @@ def webhook():
             reply_line(reply_token, "📊 今週の傾向を集計中ウホ！少し待ってウホ🦍")
             trend_text = get_weekly_trend_text()
             push_line(trend_text)
+
+        elif is_weight_sync_request(event):
+            logger.info("体重即時同期リクエストを受信しました")
+            reply_line(reply_token, "⚖️ Eufy から体重データを今すぐ取得するウホ！\n30秒〜1分後に結果を送るウホ🦍")
+            if not trigger_data_sync(force_weight=True):
+                logger.error("data-sync ワークフローの起動に失敗しました")
 
     return jsonify({"status": "ok"})
 

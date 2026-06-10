@@ -13,6 +13,10 @@ on:
         description: "睡眠レポートを時間外でも強制送信する (true/false)"
         required: false
         default: "false"
+      force_weight:
+        description: "weight_sent フラグを無視して体重データを強制再取得する (true/false)"
+        required: false
+        default: "false"
 
 jobs:
   sync:
@@ -43,6 +47,7 @@ jobs:
           EUFY_EMAIL: ${{ secrets.EUFY_EMAIL }}
           EUFY_PASSWORD: ${{ secrets.EUFY_PASSWORD }}
           FORCE_SLEEP: ${{ github.event.inputs.force_sleep }}
+          FORCE_WEIGHT: ${{ github.event.inputs.force_weight }}
         run: python -m src.data_sync
 
       - name: Upload log on failure
