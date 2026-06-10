@@ -142,6 +142,48 @@ class GarminClient:
     # ------------------------------------------------------------------
 
     @staticmethod
+    def _extract_hr_zones(activity: dict) -> Optional[str]:
+        """
+        Garmin アクティビティ raw データから心拍 Zone 比率を抽出して文字列で返す。
+        データが存在しない場合は None を返す。
+
+        Garmin Connect API は Zone 情報を複数のフィールド名で返すことがある:
+          - heartRateZones: list of {zoneLowBoundary, zoneHighBoundary, secsInZone, ...}
+          - timeInHeartRateZone: 同様
+          - hrTimeInZone_0 〜 hrTimeInZone_4: 各 Zone の秒数（古い形式）
+        """
+        # 新形式: heartRateZones / timeInHeartRateZone
+        zones_data = activity.get("heartRateZones") or activity.get("timeInHeartRateZone")
+        if zones_data and isinstance(zones_data, list):
+            total_secs = sum(z.get("secsInZone", 0) or 0 for z in zones_data)
+            if total_secs > 0:
+                parts = []
+                for i, z in enumerate(zones_data, start=1):
+                    secs = z.get("secsInZone", 0) or 0
+                    pct = round(secs / total_secs * 100)
+                    if pct > 0:
+                        parts.append(f"Z{i}:{pct}%")
+                if parts:
+                    return " ".join(parts)
+
+        # 旧形式: hrTimeInZone_0 〜 hrTimeInZone_4
+        zone_secs = []
+        for i in range(5):
+            v = activity.get(f"hrTimeInZone_{i}", 0) or 0
+            zone_secs.append(float(v))
+        total_secs = sum(zone_secs)
+        if total_secs > 0:
+            parts = []
+            for i, secs in enumerate(zone_secs, start=1):
+                pct = round(secs / total_secs * 100)
+                if pct > 0:
+                    parts.append(f"Z{i}:{pct}%")
+            if parts:
+                return " ".join(parts)
+
+        return None
+
+    @staticmethod
     def format_activity_summary(activity: dict) -> dict:
         """
         Garmin のアクティビティ raw データから通知・LLM分析に必要なフィールドを抽出する。
@@ -159,7 +201,7 @@ class GarminClient:
         else:
             avg_pace = "N/A"
 
-        return {
+        result = {
             "activity_id": str(activity.get("activityId", "")),
             "activity_type": activity.get("activityType", {}).get("typeKey", "unknown"),
             "start_time": activity.get("startTimeLocal", ""),
@@ -168,6 +210,12 @@ class GarminClient:
             "avg_heart_rate": avg_hr,
             "calories": activity.get("calories", 0),
         }
+
+        zones = GarminClient._extract_hr_zones(activity)
+        if zones:
+            result["heart_rate_zones"] = zones
+
+        return result
 
     @staticmethod
     def format_sleep_summary(sleep_dto: dict) -> dict:

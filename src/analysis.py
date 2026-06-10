@@ -57,63 +57,86 @@ def build_sheets_client(env: dict) -> SheetsClient:
     return SheetsClient(credentials_info, env["GOOGLE_SHEETS_ID"])
 
 
+def _fetch_common_data(env: dict, sheets: SheetsClient) -> tuple:
+    """当日サマリー・アクティビティ・過去履歴を取得して返す。"""
+    today_str = str(date.today())
+    today_summary = sheets.get_daily_summary(today_str) or {"date": today_str}
+
+    garmin = GarminClient(env["GARMIN_EMAIL"], env["GARMIN_PASSWORD"], sheets)
+    activities_raw = garmin.get_today_activities()
+    today_activities = [garmin.format_activity_summary(a) for a in activities_raw]
+
+    history = sheets.get_recent_summaries(days=30)
+    history = [s for s in history if s.get("date") != today_str]
+
+    logger.info(
+        "分析データ: 当日アクティビティ %d件、履歴 %d日分",
+        len(today_activities),
+        len(history),
+    )
+    return today_summary, today_activities, history
+
+
+def run_default_analysis(env: dict, sheets: SheetsClient, force: bool) -> None:
+    """通常の日次レビュー分析を実行して LINE に送信する。"""
+    status = sheets.get_today_status()
+    if not force and status.get("llm_sent") in (True, "TRUE", "True", 1, "1"):
+        logger.info("本日すでに LLM 分析を送信済みです。スキップします。")
+        return
+
+    today_summary, today_activities, history = _fetch_common_data(env, sheets)
+
+    gemini = GeminiClient(env["GEMINI_API_KEY"])
+    analysis = gemini.analyze(today_summary, today_activities, history)
+
+    if analysis is None:
+        logger.error("Gemini API からの分析結果が取得できませんでした")
+        sys.exit(1)
+
+    line = LineClient(env["LINE_CHANNEL_ACCESS_TOKEN"], env["LINE_USER_ID"])
+    line.send_llm_analysis_flex(analysis)
+
+    sheets.update_status({"llm_sent": True})
+    logger.info("LLM 分析送信完了")
+
+
+def run_tomorrow_plan(env: dict, sheets: SheetsClient) -> None:
+    """翌日のトレーニングプランを生成して LINE に送信する。"""
+    today_summary, today_activities, history = _fetch_common_data(env, sheets)
+
+    gemini = GeminiClient(env["GEMINI_API_KEY"])
+    plan = gemini.analyze_tomorrow_plan(today_summary, today_activities, history)
+
+    if plan is None:
+        logger.error("Gemini API からの翌日プラン生成に失敗しました")
+        sys.exit(1)
+
+    line = LineClient(env["LINE_CHANNEL_ACCESS_TOKEN"], env["LINE_USER_ID"])
+    line.send_tomorrow_plan_flex(plan)
+    logger.info("翌日プラン送信完了")
+
+
 def main() -> None:
     logger.info("===== llm-analysis 開始 =====")
 
-    # FORCE_ANALYSIS=true のとき llm_sent チェックを無視（手動ボタン押下など）
+    mode = os.getenv("ANALYSIS_MODE", "default").strip().lower()
     force = os.getenv("FORCE_ANALYSIS", "false").lower() in ("true", "1", "yes")
+
     if force:
         logger.info("FORCE_ANALYSIS が有効です。llm_sent フラグを無視して再分析します。")
+    logger.info("ANALYSIS_MODE: %s", mode)
 
     try:
         env = load_env()
         sheets = build_sheets_client(env)
 
-        # 重複送信防止チェック（手動トリガー時はスキップ）
-        status = sheets.get_today_status()
-        if not force and status.get("llm_sent") in (True, "TRUE", "True", 1, "1"):
-            logger.info("本日すでに LLM 分析を送信済みです。スキップします。")
-            return
-
-        # 当日サマリー取得
-        today_str = str(date.today())
-        today_summary = sheets.get_daily_summary(today_str) or {"date": today_str}
-
-        # 当日アクティビティ（Garmin から再取得してフォーマット済みリストを作成）
-        garmin = GarminClient(env["GARMIN_EMAIL"], env["GARMIN_PASSWORD"], sheets)
-        activities_raw = garmin.get_today_activities()
-        today_activities = [garmin.format_activity_summary(a) for a in activities_raw]
-
-        # 過去30日サマリー取得
-        history = sheets.get_recent_summaries(days=30)
-        # 当日分は today_summary で別渡しするため除外
-        history = [s for s in history if s.get("date") != today_str]
-
-        logger.info(
-            "分析データ: 当日アクティビティ %d件、履歴 %d日分",
-            len(today_activities),
-            len(history),
-        )
-
-        # Gemini 分析
-        gemini = GeminiClient(env["GEMINI_API_KEY"])
-        analysis_text = gemini.analyze(today_summary, today_activities, history)
-
-        if analysis_text is None:
-            logger.error("Gemini API からの分析結果が取得できませんでした")
-            sys.exit(1)
-
-        # LINE 送信
-        line = LineClient(env["LINE_CHANNEL_ACCESS_TOKEN"], env["LINE_USER_ID"])
-        line.send_llm_analysis(analysis_text)
-
-        # 送信済みフラグを更新
-        sheets.update_status({"llm_sent": True})
-        logger.info("LLM 分析送信完了")
+        if mode == "tomorrow_plan":
+            run_tomorrow_plan(env, sheets)
+        else:
+            run_default_analysis(env, sheets, force)
 
     except Exception as e:
         logger.exception("llm-analysis で予期せぬエラーが発生しました: %s", e)
-        # エラー内容を LINE に通知して、ユーザーが無限に待ち続けないようにする
         try:
             token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "")
             user_id = os.getenv("LINE_USER_ID", "")
@@ -124,7 +147,7 @@ def main() -> None:
                     f"\n"
                     f"原因: {str(e)[:120]}\n"
                     f"\n"
-                    f"しばらく待ってからもう一度「分析して」と送ってみてウホ🦍"
+                    f"しばらく待ってからもう一度試してみてウホ🦍"
                 )
         except Exception as notify_err:
             logger.error("エラー通知の LINE 送信にも失敗: %s", notify_err)

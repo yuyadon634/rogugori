@@ -27,6 +27,18 @@ _ANALYSIS_BUTTON = ButtonComponent(
     margin="md",
 )
 
+_TOMORROW_PLAN_BUTTON = ButtonComponent(
+    action=PostbackAction(label="🏃 明日のメニューを詳しく", data="action=tomorrow_plan"),
+    style="secondary",
+    margin="sm",
+)
+
+_WEEKLY_TREND_BUTTON = ButtonComponent(
+    action=PostbackAction(label="📊 今週の傾向を見る", data="action=weekly_trend"),
+    style="secondary",
+    margin="sm",
+)
+
 
 class LineClient:
     def __init__(self, channel_access_token: str, user_id: str):
@@ -158,7 +170,197 @@ class LineClient:
         )
         self._push_with_analysis_button(text)
 
+    # ------------------------------------------------------------------
+    # Flex Message ヘルパー
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _make_section_title(text: str) -> TextComponent:
+        return TextComponent(text=text, weight="bold", size="sm", margin="md", color="#555555")
+
+    @staticmethod
+    def _make_bullet(text: str) -> TextComponent:
+        return TextComponent(
+            text=f"• {text}",
+            wrap=True,
+            size="sm",
+            margin="xs",
+            color="#333333",
+        )
+
+    def _build_analysis_bubble(self, analysis: dict) -> BubbleContainer:
+        """analyze() の戻り値 dict から BubbleContainer を組み立てる。"""
+        summary = analysis.get("summary", "")
+        good_points = analysis.get("good_points", [])
+        issues = analysis.get("issues", [])
+        action_plan = analysis.get("action_plan", [])
+
+        body_contents = [
+            TextComponent(text=summary, wrap=True, size="sm", color="#333333"),
+        ]
+
+        if good_points:
+            body_contents.append(SeparatorComponent(margin="lg"))
+            body_contents.append(self._make_section_title("✅ 良かった点"))
+            for p in good_points:
+                body_contents.append(self._make_bullet(p))
+
+        if issues:
+            body_contents.append(SeparatorComponent(margin="lg"))
+            body_contents.append(self._make_section_title("⚠️ 課題・改善点"))
+            for iss in issues:
+                body_contents.append(self._make_bullet(iss))
+
+        if action_plan:
+            body_contents.append(SeparatorComponent(margin="lg"))
+            body_contents.append(self._make_section_title("💪 明日のアクションプラン"))
+            for plan in action_plan:
+                body_contents.append(self._make_bullet(plan))
+
+        footer_contents = [
+            _TOMORROW_PLAN_BUTTON,
+            _WEEKLY_TREND_BUTTON,
+            SeparatorComponent(margin="md"),
+            _ANALYSIS_BUTTON,
+        ]
+
+        return BubbleContainer(
+            header=BoxComponent(
+                layout="vertical",
+                background_color="#2E7D32",
+                contents=[
+                    TextComponent(
+                        text="🦍 ゴリラコーチのレビュー",
+                        weight="bold",
+                        size="md",
+                        color="#FFFFFF",
+                    )
+                ],
+            ),
+            body=BoxComponent(
+                layout="vertical",
+                contents=body_contents,
+                padding_all="lg",
+            ),
+            footer=BoxComponent(
+                layout="vertical",
+                contents=footer_contents,
+                padding_all="md",
+            ),
+        )
+
+    def _build_tomorrow_plan_bubble(self, plan: dict) -> BubbleContainer:
+        """analyze_tomorrow_plan() の戻り値 dict から BubbleContainer を組み立てる。"""
+        headline = plan.get("headline", "明日のトレーニングプラン")
+        menu = plan.get("menu", [])
+        rationale = plan.get("rationale", "")
+        caution = plan.get("caution", "")
+
+        body_contents = [
+            TextComponent(text=headline, wrap=True, size="sm", weight="bold", color="#333333"),
+        ]
+
+        if menu:
+            body_contents.append(SeparatorComponent(margin="lg"))
+            body_contents.append(self._make_section_title("🏃 メニュー"))
+            for item in menu:
+                body_contents.append(self._make_bullet(item))
+
+        if rationale:
+            body_contents.append(SeparatorComponent(margin="lg"))
+            body_contents.append(self._make_section_title("📝 選んだ理由"))
+            body_contents.append(
+                TextComponent(text=rationale, wrap=True, size="sm", color="#333333", margin="xs")
+            )
+
+        if caution:
+            body_contents.append(SeparatorComponent(margin="lg"))
+            body_contents.append(self._make_section_title("⚡ 注意"))
+            body_contents.append(
+                TextComponent(text=caution, wrap=True, size="sm", color="#333333", margin="xs")
+            )
+
+        return BubbleContainer(
+            header=BoxComponent(
+                layout="vertical",
+                background_color="#1565C0",
+                contents=[
+                    TextComponent(
+                        text="🏃 明日のトレーニングメニュー",
+                        weight="bold",
+                        size="md",
+                        color="#FFFFFF",
+                    )
+                ],
+            ),
+            body=BoxComponent(
+                layout="vertical",
+                contents=body_contents,
+                padding_all="lg",
+            ),
+            footer=BoxComponent(
+                layout="vertical",
+                contents=[_ANALYSIS_BUTTON],
+                padding_all="md",
+            ),
+        )
+
+    # ------------------------------------------------------------------
+    # LLM 分析送信
+    # ------------------------------------------------------------------
+
     def send_llm_analysis(self, analysis_text: str) -> None:
-        """LLM による総括分析テキストを送信する。"""
+        """プレーンテキストで LLM 分析を送信する（フォールバック用）。"""
         header = "🦍 ゴリラコーチからの今日のレビューだウホ！\n\n"
         self._push(header + analysis_text)
+
+    def send_llm_analysis_flex(self, analysis: dict) -> None:
+        """
+        analyze() の戻り値 dict を 4セクション Flex Message で送信する。
+        Flex 組み立て失敗時はプレーンテキストにフォールバックする。
+        """
+        try:
+            bubble = self._build_analysis_bubble(analysis)
+            summary = analysis.get("summary", "")
+            alt = f"🦍 ゴリラコーチのレビュー: {summary[:50]}"
+            msg = FlexSendMessage(alt_text=alt, contents=bubble)
+            self._api.push_message(self._user_id, msg)
+            logger.info("LINE Flex レビュー送信完了")
+        except Exception as e:
+            logger.warning("Flex Message 送信失敗、プレーンテキストにフォールバック: %s", e)
+            lines = ["🦍 ゴリラコーチからの今日のレビューだウホ！\n"]
+            if analysis.get("summary"):
+                lines.append(analysis["summary"])
+            if analysis.get("good_points"):
+                lines.append("\n✅ 良かった点")
+                lines.extend(f"• {p}" for p in analysis["good_points"])
+            if analysis.get("issues"):
+                lines.append("\n⚠️ 課題・改善点")
+                lines.extend(f"• {i}" for i in analysis["issues"])
+            if analysis.get("action_plan"):
+                lines.append("\n💪 明日のアクションプラン")
+                lines.extend(f"• {a}" for a in analysis["action_plan"])
+            self._push("\n".join(lines))
+
+    def send_tomorrow_plan_flex(self, plan: dict) -> None:
+        """
+        analyze_tomorrow_plan() の戻り値 dict を Flex Message で送信する。
+        Flex 組み立て失敗時はプレーンテキストにフォールバックする。
+        """
+        try:
+            bubble = self._build_tomorrow_plan_bubble(plan)
+            headline = plan.get("headline", "明日のトレーニングプラン")
+            msg = FlexSendMessage(alt_text=f"🏃 {headline[:50]}", contents=bubble)
+            self._api.push_message(self._user_id, msg)
+            logger.info("LINE Flex 翌日プラン送信完了")
+        except Exception as e:
+            logger.warning("Flex Message 送信失敗、プレーンテキストにフォールバック: %s", e)
+            lines = [f"🏃 {plan.get('headline', '明日のトレーニングプラン')}\n"]
+            if plan.get("menu"):
+                lines.append("メニュー:")
+                lines.extend(f"• {m}" for m in plan["menu"])
+            if plan.get("rationale"):
+                lines.append(f"\n理由: {plan['rationale']}")
+            if plan.get("caution"):
+                lines.append(f"⚡ 注意: {plan['caution']}")
+            self._push("\n".join(lines))

@@ -38,6 +38,8 @@ jobs:
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           # LINE ボタン押下時は force=true が渡され、llm_sent フラグを無視して再分析する
           FORCE_ANALYSIS: ${{ github.event.client_payload.force || 'false' }}
+          # "tomorrow_plan" のとき翌日メニュー生成モードで実行する（デフォルトは "default"）
+          ANALYSIS_MODE: ${{ github.event.client_payload.mode || 'default' }}
         run: python -m src.analysis
 
       - name: Notify LINE on failure
