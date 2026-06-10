@@ -109,8 +109,17 @@ class GarminClient:
                 if not data or "dailySleepDTO" not in data:
                     logger.info("睡眠データなし: %s", yesterday)
                     return None
-                logger.info("睡眠データ取得完了: %s", yesterday)
-                return data["dailySleepDTO"]
+                dto = data["dailySleepDTO"]
+                sleep_seconds = dto.get("sleepTimeSeconds", 0) or 0
+                if sleep_seconds < 1800:
+                    # 30分未満は Garmin の未処理プレースホルダーとみなしてスキップ
+                    logger.info(
+                        "睡眠データが未処理（sleepTimeSeconds=%d）: %s。次回リトライします",
+                        sleep_seconds, yesterday,
+                    )
+                    return None
+                logger.info("睡眠データ取得完了: %s (%.1fh)", yesterday, sleep_seconds / 3600)
+                return dto
             except Exception as e:
                 logger.warning("睡眠データ取得失敗: %s", e)
                 return None
