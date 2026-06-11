@@ -246,7 +246,14 @@ def generate_rich_menu_image() -> bytes:
     draw.rectangle([0, ROW_H - 2, W, ROW_H + 2], fill=COLOR_DIVIDER)
 
     buf = BytesIO()
-    img.save(buf, format="PNG")
+    img.save(buf, format="JPEG", quality=85, optimize=True)
+    size_kb = buf.tell() / 1024
+    logger.info("生成画像サイズ: %.1f KB", size_kb)
+    if size_kb > 1024:
+        logger.warning("1 MB 超のため quality=70 で再圧縮します")
+        buf = BytesIO()
+        img.save(buf, format="JPEG", quality=70, optimize=True)
+        logger.info("再圧縮後サイズ: %.1f KB", buf.tell() / 1024)
     return buf.getvalue()
 
 
@@ -274,7 +281,7 @@ def upload_rich_menu_image(rich_menu_id: str, image_bytes: bytes) -> None:
         f"https://api-data.line.me/v2/bot/richmenu/{rich_menu_id}/content",
         headers={
             "Authorization": f"Bearer {TOKEN}",
-            "Content-Type": "image/png",
+            "Content-Type": "image/jpeg",
         },
         data=image_bytes,
         timeout=30,
