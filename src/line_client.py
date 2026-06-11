@@ -154,6 +154,7 @@ class LineClient:
         issues = analysis.get("issues", [])
         top_priority = analysis.get("top_priority", "")
         action_plan = analysis.get("action_plan", [])
+        gorilla_monologue = analysis.get("gorilla_monologue", "")
 
         body_contents = [
             TextComponent(text=summary, wrap=True, size="sm", color="#333333"),
@@ -203,6 +204,33 @@ class LineClient:
             body_contents.append(self._make_section_title("💪 明日のアクションプラン"))
             for plan in action_plan:
                 body_contents.append(self._make_bullet(plan))
+
+        if gorilla_monologue:
+            body_contents.append(SeparatorComponent(margin="lg"))
+            body_contents.append(
+                BoxComponent(
+                    layout="vertical",
+                    background_color="#F5F5F5",
+                    corner_radius="6px",
+                    margin="md",
+                    padding_all="sm",
+                    contents=[
+                        TextComponent(
+                            text="🦍 コーチの戯言",
+                            size="xs",
+                            color="#757575",
+                            weight="bold",
+                        ),
+                        TextComponent(
+                            text=gorilla_monologue,
+                            wrap=True,
+                            size="sm",
+                            color="#616161",
+                            margin="xs",
+                        ),
+                    ],
+                )
+            )
 
         return BubbleContainer(
             header=BoxComponent(
@@ -374,6 +402,8 @@ class LineClient:
             if analysis.get("action_plan"):
                 lines.append("\n💪 明日のアクションプラン")
                 lines.extend(f"• {a}" for a in analysis["action_plan"])
+            if analysis.get("gorilla_monologue"):
+                lines.append(f"\n🦍 コーチの戯言\n{analysis['gorilla_monologue']}")
             self._push("\n".join(lines))
 
     def send_weekly_trend_flex(self, trend: dict) -> None:

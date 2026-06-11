@@ -65,7 +65,7 @@ BOT_LEFT_X,    BOT_LEFT_Y    = 0,     ROW_H
 BOT_RIGHT_X,   BOT_RIGHT_Y   = COL_W, ROW_H
 
 # カラーパレット
-COLOR_BG       = (30, 30, 30)        # ダークグレー背景
+COLOR_BG       = (50, 50, 50)        # ダークグレー背景（ゴリラ画像の背景色に合わせる）
 COLOR_COL1     = (46, 125, 50)       # 濃い緑（分析開始）
 COLOR_COL2     = (21, 101, 192)      # 濃い青（明日のメニュー）
 COLOR_COL3     = (106, 27, 154)      # 紫（今週の傾向）
@@ -178,8 +178,8 @@ def _draw_gorilla_button(
     gorilla = gorilla.resize((cell_w, cell_h), Image.LANCZOS)
     img.paste(gorilla, (x0, y0), mask=gorilla)
 
-    # パネル（テキストボックス）: セル下部 38% の帯として描画
-    panel_h_ratio = 0.38
+    # パネル（テキストボックス）: セル下部 35% の帯として描画
+    panel_h_ratio = 0.35
     panel_y0 = y0 + int(cell_h * (1 - panel_h_ratio))
     panel_y1 = y1
     pad_x = cell_w // 10

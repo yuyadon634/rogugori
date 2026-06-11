@@ -27,8 +27,9 @@ _ANALYSIS_SCHEMA = {
         "issues": {"type": "array", "items": {"type": "string"}},
         "top_priority": {"type": "string"},
         "action_plan": {"type": "array", "items": {"type": "string"}},
+        "gorilla_monologue": {"type": "string"},
     },
-    "required": ["summary", "good_points", "issues", "top_priority", "action_plan"],
+    "required": ["summary", "good_points", "issues", "top_priority", "action_plan", "gorilla_monologue"],
 }
 
 # analyze_weekly_trend() の戻り値スキーマ
@@ -168,7 +169,14 @@ class GeminiClient:
             f"action_plan: 明日へのアクションプランのリスト。以下の3原則を必ず守ること:\n"
             f"  1. issuesで指摘した課題のそれぞれに対応するアクションを最低1つ含めること（課題の放置は不可）\n"
             f"  2. 種目・距離・ペース・心拍の数値を含む具体的な内容で、現在のフェーズに合った内容にすること\n"
-            f"  3. BMI・体重の改善に言及する場合は「今週-0.3kg」「月-1kg」など週次・月次の具体的な数値目標まで落とし込むこと"
+            f"  3. BMI・体重の改善に言及する場合は「今週-0.3kg」「月-1kg」など週次・月次の具体的な数値目標まで落とし込むこと\n"
+            f"\n"
+            f"gorilla_monologue: レビューの最後に添える「コーチの戯言」。以下の条件をすべて満たすこと:\n"
+            f"  - ゴリラコーチらしいウホ口調で、1〜2文（40〜80文字程度）\n"
+            f"  - ランニング・トレーニング・体・人生・宇宙などに関係するような・しないような、意味深で考えさせられる内容\n"
+            f"  - 読んだ人がクスッと笑えるユーモアを必ず含めること\n"
+            f"  - 説教や指導ではなく、ぼんやりとした哲学的な独り言のトーン\n"
+            f"  - 毎回必ず異なる内容にすること（使い回し禁止）"
         )
 
     def _build_weekly_trend_prompt(self) -> str:
