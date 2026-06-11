@@ -20,13 +20,17 @@ import json
 import logging
 import os
 import sys
-from datetime import datetime, timedelta, timezone
 
 import requests
 from dotenv import load_dotenv
 from flask import Flask, abort, jsonify, request
 
 load_dotenv()
+
+# webhook/ から src パッケージを import できるようにリポジトリルートを sys.path に追加する
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -36,8 +40,6 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
-
-_JST = timezone(timedelta(hours=9))
 
 LINE_CHANNEL_SECRET = os.getenv("LINE_CHANNEL_SECRET", "")
 LINE_CHANNEL_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "")
@@ -202,62 +204,19 @@ def push_line(text: str) -> None:
 
 def get_weekly_trend_text() -> str:
     """
-    Google Sheets から直近7日分のサマリーを取得し、テキストサマリーを返す。
+    直近7日分のサマリーから即時返信用のテキストを生成して返す。
+    Sheets アクセス・整形ロジックは SheetsClient に集約しており、ここは委譲のみ行う。
     Sheets 接続に失敗した場合はエラーメッセージを返す。
     """
     if not GOOGLE_SHEETS_ID or not GOOGLE_SERVICE_ACCOUNT_JSON:
         return "⚠️ Sheets の設定が未完了のため傾向を取得できなかったウホ…"
 
     try:
-        import gspread
-        from google.oauth2.service_account import Credentials
+        from src.sheets_client import SheetsClient
 
         creds_info = json.loads(GOOGLE_SERVICE_ACCOUNT_JSON)
-        creds = Credentials.from_service_account_info(
-            creds_info,
-            scopes=["https://www.googleapis.com/auth/spreadsheets"],
-        )
-        gc = gspread.authorize(creds)
-        spreadsheet = gc.open_by_key(GOOGLE_SHEETS_ID)
-        ws = spreadsheet.worksheet("daily_summary")
-        records = ws.get_all_records()
-
-        cutoff = (datetime.now(_JST) - timedelta(days=7)).date()
-        recent = []
-        for row in records:
-            try:
-                d = datetime.strptime(row["date"], "%Y-%m-%d").date()
-                if d >= cutoff:
-                    recent.append(row)
-            except (ValueError, KeyError):
-                continue
-
-        recent.sort(key=lambda r: r["date"])
-
-        if not recent:
-            return "📊 直近7日分のデータがまだないウホ…"
-
-        lines = ["📊 今週の傾向だウホ！\n"]
-        for r in recent:
-            dist = r.get("total_distance_km", 0) or 0
-            weight = r.get("weight_kg", "-") or "-"
-            sleep = r.get("sleep_score", "-") or "-"
-            date_str = r.get("date", "")[-5:]  # MM-DD 形式
-            run_mark = f"🏃{dist}km" if float(dist) > 0 else "😴休養"
-            lines.append(f"{date_str}: {run_mark} ⚖️{weight}kg 💤睡眠{sleep}点")
-
-        # 体重トレンド
-        weights = [float(r["weight_kg"]) for r in recent if r.get("weight_kg")]
-        if len(weights) >= 2:
-            diff = round(weights[-1] - weights[0], 1)
-            sign = "+" if diff > 0 else ""
-            lines.append(f"\n体重推移: {sign}{diff}kg（{len(weights)}回計測）")
-
-        run_days = sum(1 for r in recent if float(r.get("total_distance_km", 0) or 0) > 0)
-        lines.append(f"運動日数: {run_days}/{len(recent)}日")
-
-        return "\n".join(lines)
-
+        sheets = SheetsClient(creds_info, GOOGLE_SHEETS_ID)
+        return sheets.get_weekly_trend_text(days=7)
     except Exception as e:
         logger.error("週間傾向取得エラー: %s", e)
         return f"⚠️ 傾向の取得中にエラーが発生したウホ…\n原因: {str(e)[:80]}"
