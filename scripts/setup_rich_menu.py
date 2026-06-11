@@ -23,6 +23,7 @@ import sys
 import json
 import logging
 from io import BytesIO
+from pathlib import Path
 
 import requests
 from dotenv import load_dotenv
@@ -33,6 +34,8 @@ try:
 except ImportError:
     HAS_PILLOW = False
     print("[WARN] Pillow が未インストールです。画像生成をスキップし、別途手動で画像をアップロードしてください。")
+
+ASSETS_DIR = Path(__file__).parent.parent / "assets" / "rich_menu"
 
 load_dotenv()
 
@@ -142,24 +145,58 @@ def _load_font(size: int) -> "ImageFont.FreeTypeFont | ImageFont.ImageFont":
 
 def _draw_button(draw: "ImageDraw.ImageDraw", x0: int, y0: int, x1: int, y1: int,
                  bg_color: tuple, icon: str, label: str, sub_label: str) -> None:
-    """ボタン領域を描画する。"""
-    # 背景塗りつぶし
+    """ボタン領域を描画する（フォールバック用）。"""
     draw.rectangle([x0, y0, x1, y1], fill=bg_color)
-
     cx = (x0 + x1) // 2
     cy = (y0 + y1) // 2
-
-    # アイコン（大きめ絵文字風テキスト）
     font_icon = _load_font(200)
     draw.text((cx, cy - 120), icon, font=font_icon, fill=COLOR_TEXT, anchor="mm")
-
-    # メインラベル
     font_main = _load_font(90)
     draw.text((cx, cy + 100), label, font=font_main, fill=COLOR_TEXT, anchor="mm")
-
-    # サブラベル
     font_sub = _load_font(55)
     draw.text((cx, cy + 210), sub_label, font=font_sub, fill=(200, 200, 200), anchor="mm")
+
+
+def _draw_gorilla_button(
+    img: "Image.Image",
+    draw: "ImageDraw.ImageDraw",
+    x0: int, y0: int, x1: int, y1: int,
+    gorilla_path: "Path",
+    panel_color: tuple,
+    label: str,
+    sub_label: str,
+) -> None:
+    """ゴリラロボット画像＋テキストパネルでボタン領域を描画する。"""
+    cell_w = x1 - x0
+    cell_h = y1 - y0
+
+    # ベース背景（ゴリラ画像の透過部分に馴染む色）
+    draw.rectangle([x0, y0, x1, y1], fill=COLOR_BG)
+
+    # ゴリラ画像をセルサイズにリサイズして貼り付け
+    gorilla = Image.open(gorilla_path).convert("RGBA")
+    gorilla = gorilla.resize((cell_w, cell_h), Image.LANCZOS)
+    img.paste(gorilla, (x0, y0), mask=gorilla)
+
+    # パネル（テキストボックス）: セル下部 38% の帯として描画
+    panel_h_ratio = 0.38
+    panel_y0 = y0 + int(cell_h * (1 - panel_h_ratio))
+    panel_y1 = y1
+    pad_x = cell_w // 10
+
+    # パネル背景（角丸なし・帯状で端まで塗りつぶして縁を明確に）
+    draw.rectangle([x0, panel_y0, x1, panel_y1], fill=panel_color)
+
+    # パネル上辺に細いハイライト線
+    draw.rectangle([x0, panel_y0, x1, panel_y0 + 6], fill=(255, 255, 255, 80))
+
+    # テキスト描画
+    cx = (x0 + x1) // 2
+    panel_mid = (panel_y0 + panel_y1) // 2
+    font_main = _load_font(85)
+    font_sub = _load_font(50)
+    draw.text((cx, panel_mid - 45), label,     font=font_main, fill=(255, 255, 255), anchor="mm")
+    draw.text((cx, panel_mid + 55), sub_label, font=font_sub,  fill=(210, 210, 210), anchor="mm")
 
 
 def generate_rich_menu_image() -> bytes:
@@ -167,37 +204,45 @@ def generate_rich_menu_image() -> bytes:
     img = Image.new("RGB", (W, H), color=COLOR_BG)
     draw = ImageDraw.Draw(img)
 
-    # 上段左: 分析開始（緑）
-    _draw_button(
-        draw, TOP_LEFT_X, TOP_LEFT_Y, COL_W - 2, ROW_H - 2,
-        COLOR_COL1,
-        "🔍", "分析開始", "今日の全データを総括",
-    )
+    gorilla_files = {
+        "analysis": ASSETS_DIR / "gorilla_analysis.png",
+        "tomorrow": ASSETS_DIR / "gorilla_tomorrow.png",
+        "trend":    ASSETS_DIR / "gorilla_trend.png",
+        "weight":   ASSETS_DIR / "gorilla_weight.png",
+    }
+    use_gorilla = all(p.exists() for p in gorilla_files.values())
 
-    # 上段右: 明日のメニュー（青）
-    _draw_button(
-        draw, TOP_RIGHT_X + 2, TOP_RIGHT_Y, W, ROW_H - 2,
-        COLOR_COL2,
-        "🏃", "明日のメニュー", "翌日のトレーニング計画",
-    )
+    if use_gorilla:
+        logger.info("ゴリラ画像を使用してリッチメニューを生成します")
+        # 上段左: 分析開始（緑）
+        _draw_gorilla_button(
+            img, draw, TOP_LEFT_X, TOP_LEFT_Y, COL_W - 2, ROW_H - 2,
+            gorilla_files["analysis"], COLOR_COL1, "分析開始", "今日の全データを総括",
+        )
+        # 上段右: 明日のメニュー（青）
+        _draw_gorilla_button(
+            img, draw, TOP_RIGHT_X + 2, TOP_RIGHT_Y, W, ROW_H - 2,
+            gorilla_files["tomorrow"], COLOR_COL2, "明日のメニュー", "翌日のトレーニング計画",
+        )
+        # 下段左: 今週の傾向（紫）
+        _draw_gorilla_button(
+            img, draw, BOT_LEFT_X, BOT_LEFT_Y + 2, COL_W - 2, H,
+            gorilla_files["trend"], COLOR_COL3, "今週の傾向", "直近7日の運動・体重・睡眠",
+        )
+        # 下段右: 体重同期（深紅）
+        _draw_gorilla_button(
+            img, draw, BOT_RIGHT_X + 2, BOT_RIGHT_Y + 2, W, H,
+            gorilla_files["weight"], COLOR_COL4, "体重同期", "Eufyから今すぐ取得",
+        )
+    else:
+        logger.warning("ゴリラ画像が見つかりません。テキストのみのフォールバックで生成します")
+        _draw_button(draw, TOP_LEFT_X, TOP_LEFT_Y, COL_W - 2, ROW_H - 2, COLOR_COL1, "🔍", "分析開始", "今日の全データを総括")
+        _draw_button(draw, TOP_RIGHT_X + 2, TOP_RIGHT_Y, W, ROW_H - 2, COLOR_COL2, "🏃", "明日のメニュー", "翌日のトレーニング計画")
+        _draw_button(draw, BOT_LEFT_X, BOT_LEFT_Y + 2, COL_W - 2, H, COLOR_COL3, "📊", "今週の傾向", "直近7日の運動・体重・睡眠")
+        _draw_button(draw, BOT_RIGHT_X + 2, BOT_RIGHT_Y + 2, W, H, COLOR_COL4, "⚖️", "体重同期", "Eufyから今すぐ取得")
 
-    # 下段左: 今週の傾向（紫）
-    _draw_button(
-        draw, BOT_LEFT_X, BOT_LEFT_Y + 2, COL_W - 2, H,
-        COLOR_COL3,
-        "📊", "今週の傾向", "直近7日の運動・体重・睡眠",
-    )
-
-    # 下段右: 体重同期（深紅）
-    _draw_button(
-        draw, BOT_RIGHT_X + 2, BOT_RIGHT_Y + 2, W, H,
-        COLOR_COL4,
-        "⚖️", "体重同期", "Eufyから今すぐ取得",
-    )
-
-    # 縦の区切り線（中央）
+    # 区切り線
     draw.rectangle([COL_W - 2, 0, COL_W + 2, H], fill=COLOR_DIVIDER)
-    # 横の区切り線（中央）
     draw.rectangle([0, ROW_H - 2, W, ROW_H + 2], fill=COLOR_DIVIDER)
 
     buf = BytesIO()
