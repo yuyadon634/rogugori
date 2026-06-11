@@ -31,6 +31,8 @@ DAILY_SUMMARY_HEADERS = [
     "avg_heart_rate",
     "sleep_score",
     "sleep_hours",
+    "deep_sleep_hours",
+    "rem_sleep_hours",
     "weight_kg",
     "body_fat_pct",
     "bmi",

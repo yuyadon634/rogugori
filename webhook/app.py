@@ -349,7 +349,10 @@ def webhook():
 
         elif is_weekly_trend_request(event):
             logger.info("週間傾向リクエストを受信しました")
-            reply_line(reply_token, "📊 今週の傾向をゴリラコーチが分析中ウホ！\n7日分のデータをまとめてるウホ…\n1〜2分後に結果を送るウホ🦍")
+            # ① まず Sheets の生データを即時返信して体感速度を改善する
+            trend_text = get_weekly_trend_text()
+            reply_line(reply_token, trend_text)
+            # ② Gemini による詳細分析は GitHub Actions で非同期実行（1〜2分後に Flex Message で追送）
             if not trigger_llm_analysis(mode="weekly_trend"):
                 logger.error("週間傾向ワークフローの起動に失敗しました")
 

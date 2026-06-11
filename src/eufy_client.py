@@ -41,6 +41,11 @@ _JST = timezone(timedelta(hours=9))
 _MIN_PLAUSIBLE_WEIGHT = 20.0
 _MAX_PLAUSIBLE_WEIGHT = 300.0
 
+# EufyLife API の認証エラーを示す res_code 群。これ以外の非 1 コードは
+# トークン切れと無関係（データなし・パラメータ不正など）なので再ログインしない。
+# 実測値が増えたらこのセットに追加すること。
+_AUTH_ERROR_RES_CODES = {10002, 10003, 10004, 10010}
+
 
 def _to_float(value) -> Optional[float]:
     """数値に変換できれば float、できなければ None を返す。"""
@@ -170,7 +175,8 @@ class EufyClient:
     def _get(self, path: str, params: Optional[dict] = None) -> dict:
         """
         GET リクエストを送信する。
-        HTTP 401 または res_code が認証エラーを示す場合は再ログインしてリトライする。
+        HTTP 401 または res_code が認証エラー（_AUTH_ERROR_RES_CODES）を示す場合のみ
+        再ログインしてリトライする。データなし・パラメータ不正などは再ログインしない。
         """
         self._init_token()
         url = f"{self._request_host}{path}"
@@ -181,14 +187,20 @@ class EufyClient:
         if not need_relogin and resp.status_code == 200:
             try:
                 body = resp.json()
-                # res_code 1 = 成功。それ以外はエラー（トークン切れ含む）
-                if body.get("res_code") != 1:
-                    logger.warning(
-                        "EufyLife API エラー応答: res_code=%s message=%s",
-                        body.get("res_code"),
-                        body.get("message"),
-                    )
-                    need_relogin = True
+                rc = body.get("res_code")
+                if rc != 1:
+                    if rc in _AUTH_ERROR_RES_CODES:
+                        logger.warning(
+                            "EufyLife 認証エラー応答: res_code=%s message=%s → 再ログインします",
+                            rc,
+                            body.get("message"),
+                        )
+                        need_relogin = True
+                    else:
+                        raise RuntimeError(
+                            f"EufyLife API エラー: res_code={rc} "
+                            f"message={body.get('message')}"
+                        )
             except ValueError:
                 pass
 
@@ -197,6 +209,8 @@ class EufyClient:
             self._access_token = None
             self._user_id = None
             self._login()
+            # _login() で self._request_host が更新される可能性があるため URL を再構築する
+            url = f"{self._request_host}{path}"
             resp = requests.get(url, headers=self._auth_headers(), params=params, timeout=30)
 
         resp.raise_for_status()

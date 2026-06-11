@@ -8,55 +8,23 @@ llm-analysis ワークフローのエントリーポイント。
   status シートの llm_sent が True の場合は何もせず終了する。
 """
 
-import json
 import logging
 import os
 import sys
-from datetime import datetime, timezone, timedelta
-
-from dotenv import load_dotenv
-
-JST = timezone(timedelta(hours=9))
+from datetime import datetime
 
 from src.garmin_client import GarminClient
 from src.gemini_client import GeminiClient
 from src.line_client import LineClient
 from src.sheets_client import SheetsClient
+from src.utils import JST, build_sheets_client, load_env, setup_logging
 
-# ------------------------------------------------------------------
-# ロギング設定
-# ------------------------------------------------------------------
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    handlers=[
-        logging.FileHandler("app.log", encoding="utf-8"),
-        logging.StreamHandler(sys.stdout),
-    ],
-)
+setup_logging()
 logger = logging.getLogger(__name__)
 
 
-def load_env() -> dict:
-    load_dotenv()
-    required = [
-        "GARMIN_EMAIL",
-        "GARMIN_PASSWORD",
-        "GEMINI_API_KEY",
-        "LINE_CHANNEL_ACCESS_TOKEN",
-        "LINE_USER_ID",
-        "GOOGLE_SHEETS_ID",
-        "GOOGLE_SERVICE_ACCOUNT_JSON",
-    ]
-    missing = [k for k in required if not os.getenv(k)]
-    if missing:
-        raise EnvironmentError(f"必須の環境変数が未設定です: {missing}")
-    return {k: os.getenv(k) for k in required}
-
-
-def build_sheets_client(env: dict) -> SheetsClient:
-    credentials_info = json.loads(env["GOOGLE_SERVICE_ACCOUNT_JSON"])
-    return SheetsClient(credentials_info, env["GOOGLE_SHEETS_ID"])
+def _load_analysis_env() -> dict:
+    return load_env(extra_keys=["GEMINI_API_KEY"])
 
 
 def _fetch_common_data(env: dict, sheets: SheetsClient) -> tuple:
@@ -146,7 +114,7 @@ def main() -> None:
     logger.info("ANALYSIS_MODE: %s", mode)
 
     try:
-        env = load_env()
+        env = _load_analysis_env()
         sheets = build_sheets_client(env)
 
         if mode == "tomorrow_plan":
@@ -163,7 +131,7 @@ def main() -> None:
             user_id = os.getenv("LINE_USER_ID", "")
             if token and user_id:
                 error_line = LineClient(token, user_id)
-                error_line._push(
+                error_line.push_text(
                     f"⚠️ 分析中にエラーが発生したウホ…\n"
                     f"\n"
                     f"原因: {str(e)[:120]}\n"

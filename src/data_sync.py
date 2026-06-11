@@ -9,54 +9,19 @@ data-sync ワークフローのエントリーポイント。
 LLM 分析（analysis.py）は別ワークフローで行う。
 """
 
-import json
 import logging
 import os
 import sys
-from datetime import datetime, timezone, timedelta
-
-from dotenv import load_dotenv
-
-JST = timezone(timedelta(hours=9))
+from datetime import datetime
 
 from src.eufy_client import EufyClient
 from src.garmin_client import GarminClient
 from src.line_client import LineClient
 from src.sheets_client import SheetsClient
+from src.utils import JST, build_sheets_client, load_env, setup_logging
 
-# ------------------------------------------------------------------
-# ロギング設定
-# ------------------------------------------------------------------
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    handlers=[
-        logging.FileHandler("app.log", encoding="utf-8"),
-        logging.StreamHandler(sys.stdout),
-    ],
-)
+setup_logging()
 logger = logging.getLogger(__name__)
-
-
-def load_env() -> dict:
-    load_dotenv()
-    required = [
-        "GARMIN_EMAIL",
-        "GARMIN_PASSWORD",
-        "LINE_CHANNEL_ACCESS_TOKEN",
-        "LINE_USER_ID",
-        "GOOGLE_SHEETS_ID",
-        "GOOGLE_SERVICE_ACCOUNT_JSON",
-    ]
-    missing = [k for k in required if not os.getenv(k)]
-    if missing:
-        raise EnvironmentError(f"必須の環境変数が未設定です: {missing}")
-    return {k: os.getenv(k) for k in required}
-
-
-def build_sheets_client(env: dict) -> SheetsClient:
-    credentials_info = json.loads(env["GOOGLE_SERVICE_ACCOUNT_JSON"])
-    return SheetsClient(credentials_info, env["GOOGLE_SHEETS_ID"])
 
 
 def build_eufy_client(env: dict, sheets: SheetsClient) -> EufyClient | None:
@@ -119,6 +84,7 @@ def handle_sleep(
     line: LineClient,
     sheets: SheetsClient,
     status: dict,
+    rest_streak: int,
 ) -> None:
     """JST 04:00〜11:59 に睡眠レポートを1回送信する。
     FORCE_SLEEP=true の場合は時間窓チェックをスキップする。
@@ -138,7 +104,6 @@ def handle_sleep(
         return
 
     sleep = garmin.format_sleep_summary(sleep_raw)
-    _, rest_streak = calc_streaks(sheets)
     line.send_sleep_report(sleep, rest_streak)
     sheets.update_status({"sleep_sent": True})
 
@@ -160,11 +125,13 @@ def handle_activities(
     line: LineClient,
     sheets: SheetsClient,
     status: dict,
-) -> None:
-    """新規アクティビティを検出して即時通知する。"""
+    ex_streak: int,
+) -> list[str]:
+    """新規アクティビティを検出して即時通知する。
+    Returns: 通知済みアクティビティIDの最新リスト（handle_rest_day の判定に使う）
+    """
     activities_raw = garmin.get_today_activities()
     notified_ids = sheets.get_notified_activity_ids()
-    ex_streak, _ = calc_streaks(sheets)
 
     new_activities = [
         a for a in activities_raw
@@ -173,7 +140,7 @@ def handle_activities(
 
     if not new_activities:
         logger.info("新規アクティビティなし")
-        return
+        return notified_ids
 
     total_distance = sum(
         (a.get("distance", 0) or 0) for a in activities_raw
@@ -184,6 +151,7 @@ def handle_activities(
         # 連続運動日数を今日の運動があるので +1 して渡す
         line.send_activity_notification(activity, ex_streak + 1)
         sheets.add_notified_activity_id(activity["activity_id"])
+        notified_ids.append(activity["activity_id"])
         logger.info("アクティビティ通知送信: %s", activity["activity_id"])
 
     # daily_summary に集計値を反映
@@ -206,6 +174,7 @@ def handle_activities(
         "consecutive_rest_days": 0,
     })
     sheets.upsert_daily_summary(today_summary)
+    return notified_ids
 
 
 def handle_weight(
@@ -250,6 +219,8 @@ def handle_rest_day(
     line: LineClient,
     sheets: SheetsClient,
     status: dict,
+    rest_streak: int,
+    notified_activity_ids: list,
 ) -> None:
     """JST 23:00以降・当日アクティビティなし・未通知の場合に休養日通知を送信する。"""
     now_hour = datetime.now(JST).hour
@@ -258,12 +229,10 @@ def handle_rest_day(
     if status.get("rest_day_sent") in (True, "TRUE", "True", 1, "1"):
         return
 
-    notified_ids = sheets.get_notified_activity_ids()
-    if notified_ids:
+    if notified_activity_ids:
         # 今日アクティビティがあれば休養日通知は不要
         return
 
-    _, rest_streak = calc_streaks(sheets)
     rest_streak += 1  # 今日も休養
 
     line.send_rest_day_notification(rest_streak)
@@ -293,17 +262,17 @@ def main() -> None:
         eufy = build_eufy_client(env, sheets)
         line = LineClient(env["LINE_CHANNEL_ACCESS_TOKEN"], env["LINE_USER_ID"])
 
+        # Sheets API 呼び出しをまとめて1回ずつに削減する
         status = sheets.get_today_status()
         logger.info("本日のステータス: %s", status)
+        ex_streak, rest_streak = calc_streaks(sheets)
 
-        handle_sleep(garmin, line, sheets, status)
-        status = sheets.get_today_status()
-        handle_activities(garmin, line, sheets, status)
-        status = sheets.get_today_status()
+        handle_sleep(garmin, line, sheets, status, rest_streak)
+        # handle_activities の戻り値（更新後のID一覧）を handle_rest_day に渡す
+        updated_notified_ids = handle_activities(garmin, line, sheets, status, ex_streak)
         if eufy is not None:
             handle_weight(eufy, line, sheets, status)
-        status = sheets.get_today_status()
-        handle_rest_day(line, sheets, status)
+        handle_rest_day(line, sheets, status, rest_streak, updated_notified_ids)
 
     except Exception as e:
         logger.exception("data-sync で予期せぬエラーが発生しました: %s", e)

@@ -1,6 +1,4 @@
 garminconnect
-curl_cffi
-ua-generator
 gspread
 google-auth
 google-genai

@@ -133,10 +133,6 @@ class GarminClient:
         today = str(datetime.now(_JST).date())
         return self._fetch_sleep_for_date(today)
 
-    def get_yesterday_sleep(self) -> Optional[dict]:
-        """後方互換用。get_last_night_sleep() を呼ぶ。"""
-        return self.get_last_night_sleep()
-
     # ------------------------------------------------------------------
     # データ整形
     # ------------------------------------------------------------------

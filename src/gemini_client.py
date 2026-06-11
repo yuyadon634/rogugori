@@ -113,11 +113,10 @@ class GeminiClient:
             f"  ※ フェーズに応じたアドバイスを必ず反映すること\n"
         )
 
-    def _build_system_prompt(self) -> str:
+    def _build_common_header(self) -> str:
+        """役割・トーン・レースコンテキスト・Zone2評価基準の共通ヘッダーを返す。"""
         role = self._config.get("role", "コーチ")
         tone = self._config.get("tone", "")
-        metrics = self._config.get("focus_metrics", [])
-        metrics_text = "\n".join(f"  - {m}" for m in metrics)
         race_context = self._build_race_context(self._config)
         z2_threshold = self._config.get("zone2_threshold_bpm", 145)
         z2_target = self._config.get("zone2_target_pct", 70)
@@ -128,17 +127,27 @@ class GeminiClient:
             f"\n"
             f"{race_context}"
             f"\n"
+            f"【Zone2評価基準】Zone2上限: {z2_threshold}bpm\n"
+            f"  - Zone2比率 {z2_target}%以上 → 有酸素効率良好（サブ4に最適な強度）\n"
+            f"  - Zone2比率 50〜{z2_target - 1}% → やや強度高め（継続は疲労蓄積リスクあり）\n"
+            f"  - Zone2比率 50%未満 → 強度過多（翌日の回復を優先すべき）\n"
+        )
+
+    def _build_system_prompt(self) -> str:
+        metrics = self._config.get("focus_metrics", [])
+        metrics_text = "\n".join(f"  - {m}" for m in metrics)
+        z2_threshold = self._config.get("zone2_threshold_bpm", 145)
+        z2_target = self._config.get("zone2_target_pct", 70)
+
+        return (
+            self._build_common_header()
+            + f"\n"
             f"入力データの構成:\n"
             f"  - Garmin: アクティビティ（距離・ペース・心拍・Zone比率・所要時間・カロリー）\n"
             f"  - Garmin: 睡眠（スコア・合計睡眠時間・深睡眠・REM）\n"
             f"  - Eufy スケール: 体重・体脂肪率・BMI・除脂肪体重\n"
             f"  - 過去7日の日次サマリー（距離・ペース・心拍・体重・体脂肪・BMI・睡眠スコア）\n"
             f"  - 過去30日の体重・体脂肪・BMI・運動日数・ペース推移\n"
-            f"\n"
-            f"【Zone2評価基準】Zone2上限: {z2_threshold}bpm\n"
-            f"  - Zone2比率 {z2_target}%以上 → 有酸素効率良好（サブ4に最適な強度）\n"
-            f"  - Zone2比率 50〜{z2_target - 1}% → やや強度高め（継続は疲労蓄積リスクあり）\n"
-            f"  - Zone2比率 50%未満 → 強度過多（翌日の回復を優先すべき）\n"
             f"\n"
             f"以下の評価軸に基づいてデータを分析し、具体的なフィードバックを日本語で提供してください:\n"
             f"{metrics_text}\n"
@@ -156,27 +165,18 @@ class GeminiClient:
             f"good_points: 良かった点のリスト\n"
             f"issues: 課題・改善点のリスト\n"
             f"top_priority: 今日のデータから最も改善すべき1点（15文字以内、体言止め）\n"
-            f"action_plan: 明日へのアクションプランのリスト（種目・距離・ペース・心拍の数値を含む具体的な内容で。現在のフェーズに合った内容にすること）"
+            f"action_plan: 明日へのアクションプランのリスト。以下の3原則を必ず守ること:\n"
+            f"  1. issuesで指摘した課題のそれぞれに対応するアクションを最低1つ含めること（課題の放置は不可）\n"
+            f"  2. 種目・距離・ペース・心拍の数値を含む具体的な内容で、現在のフェーズに合った内容にすること\n"
+            f"  3. BMI・体重の改善に言及する場合は「今週-0.3kg」「月-1kg」など週次・月次の具体的な数値目標まで落とし込むこと"
         )
 
     def _build_weekly_trend_prompt(self) -> str:
-        role = self._config.get("role", "コーチ")
-        tone = self._config.get("tone", "")
-        race_context = self._build_race_context(self._config)
-        z2_threshold = self._config.get("zone2_threshold_bpm", 145)
         z2_target = self._config.get("zone2_target_pct", 70)
 
         return (
-            f"あなたは「{role}」です。\n"
-            f"コーチングスタイル: {tone}\n"
-            f"\n"
-            f"{race_context}"
-            f"\n"
-            f"【Zone2評価基準】Zone2上限: {z2_threshold}bpm\n"
-            f"  - Zone2比率 {z2_target}%以上 → 有酸素効率良好\n"
-            f"  - Zone2比率 50〜{z2_target - 1}% → やや強度高め\n"
-            f"  - Zone2比率 50%未満 → 強度過多\n"
-            f"\n"
+            self._build_common_header()
+            + f"\n"
             f"以下の直近7日間のデータをもとに週間コーチングレポートを作成してください。\n"
             f"\n"
             f"分析の観点:\n"
@@ -191,20 +191,13 @@ class GeminiClient:
             f"best_performance: 今週のベストパフォーマンス（1文、具体的な数値で）\n"
             f"key_issue: 今週の最重要課題（1文、15文字以内・体言止め）\n"
             f"next_week_focus: 来週の重点テーマ（1文、フェーズに合った内容で）\n"
-            f"numeric_goal: 来週の数値目標（例: 合計30km走る、Zone2比率70%以上を3回維持 など）"
+            f"numeric_goal: 来週の数値目標（例: 合計30km走る、Zone2比率{z2_target}%以上を3回維持 など）"
         )
 
     def _build_tomorrow_plan_prompt(self) -> str:
-        role = self._config.get("role", "コーチ")
-        tone = self._config.get("tone", "")
-        race_context = self._build_race_context(self._config)
-
         return (
-            f"あなたは「{role}」です。\n"
-            f"コーチングスタイル: {tone}\n"
-            f"\n"
-            f"{race_context}"
-            f"\n"
+            self._build_common_header()
+            + f"\n"
             f"以下のデータ（当日の疲労状態・体重・睡眠スコア・直近の運動履歴）をもとに、\n"
             f"明日の具体的なトレーニングメニューを提案してください。\n"
             f"\n"

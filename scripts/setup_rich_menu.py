@@ -8,11 +8,14 @@ LINE リッチメニューを登録するセットアップスクリプト。
 使い方:
   python scripts/setup_rich_menu.py
 
-メニューレイアウト (2500 x 843 px):
-  ┌──────────────────┬──────────────────┬──────────────────┐
-  │   🔍 分析開始     │ 🏃 明日のメニュー  │  📊 今週の傾向    │
-  │  (Postback)      │  (Postback)      │  (Postback)      │
-  └──────────────────┴──────────────────┴──────────────────┘
+メニューレイアウト (2500 x 1686 px / 2行×2列):
+  ┌──────────────────────┬──────────────────────┐
+  │   🔍 分析開始          │ 🏃 明日のメニュー       │
+  │  (Postback)           │  (Postback)           │
+  ├──────────────────────┼──────────────────────┤
+  │  📊 今週の傾向          │  ⚖️ 体重同期            │
+  │  (Postback)           │  (Postback)           │
+  └──────────────────────┴──────────────────────┘
 """
 
 import os
@@ -47,20 +50,25 @@ HEADERS = {
 }
 BASE_URL = "https://api.line.me"
 
-# リッチメニューの寸法
-W, H = 2500, 843
-COL_W = W // 3        # 3等分: 各列 833px（端数は右列に吸収）
-COL1_X = 0
-COL2_X = COL_W
-COL3_X = COL_W * 2
+# リッチメニューの寸法（2行×2列レイアウト）
+W, H = 2500, 1686
+ROW_H = H // 2       # 1行の高さ: 843px
+COL_W = W // 2       # 1列の幅: 1250px
+
+# 各セルの左上座標
+TOP_LEFT_X,    TOP_LEFT_Y    = 0,     0
+TOP_RIGHT_X,   TOP_RIGHT_Y   = COL_W, 0
+BOT_LEFT_X,    BOT_LEFT_Y    = 0,     ROW_H
+BOT_RIGHT_X,   BOT_RIGHT_Y   = COL_W, ROW_H
 
 # カラーパレット
-COLOR_BG = (30, 30, 30)           # ダークグレー背景
-COLOR_COL1 = (46, 125, 50)        # 濃い緑（分析開始）
-COLOR_COL2 = (21, 101, 192)       # 濃い青（明日のメニュー）
-COLOR_COL3 = (106, 27, 154)       # 紫（今週の傾向）
-COLOR_DIVIDER = (255, 255, 255)   # 白い区切り線
-COLOR_TEXT = (255, 255, 255)      # 白テキスト
+COLOR_BG       = (30, 30, 30)        # ダークグレー背景
+COLOR_COL1     = (46, 125, 50)       # 濃い緑（分析開始）
+COLOR_COL2     = (21, 101, 192)      # 濃い青（明日のメニュー）
+COLOR_COL3     = (106, 27, 154)      # 紫（今週の傾向）
+COLOR_COL4     = (183, 28, 28)       # 深紅（体重同期）
+COLOR_DIVIDER  = (255, 255, 255)     # 白い区切り線
+COLOR_TEXT     = (255, 255, 255)     # 白テキスト
 
 # リッチメニュー JSON 定義
 RICH_MENU_PAYLOAD = {
@@ -70,7 +78,7 @@ RICH_MENU_PAYLOAD = {
     "chatBarText": "🦍 ゴリラコーチ",
     "areas": [
         {
-            "bounds": {"x": COL1_X, "y": 0, "width": COL_W, "height": H},
+            "bounds": {"x": TOP_LEFT_X, "y": TOP_LEFT_Y, "width": COL_W, "height": ROW_H},
             "action": {
                 "type": "postback",
                 "label": "分析開始",
@@ -79,7 +87,7 @@ RICH_MENU_PAYLOAD = {
             },
         },
         {
-            "bounds": {"x": COL2_X, "y": 0, "width": COL_W, "height": H},
+            "bounds": {"x": TOP_RIGHT_X, "y": TOP_RIGHT_Y, "width": COL_W, "height": ROW_H},
             "action": {
                 "type": "postback",
                 "label": "明日のメニューを詳しく",
@@ -88,12 +96,21 @@ RICH_MENU_PAYLOAD = {
             },
         },
         {
-            "bounds": {"x": COL3_X, "y": 0, "width": W - COL3_X, "height": H},
+            "bounds": {"x": BOT_LEFT_X, "y": BOT_LEFT_Y, "width": COL_W, "height": ROW_H},
             "action": {
                 "type": "postback",
                 "label": "今週の傾向を見る",
                 "data": "action=weekly_trend",
                 "displayText": "📊 今週の傾向を見る！",
+            },
+        },
+        {
+            "bounds": {"x": BOT_RIGHT_X, "y": BOT_RIGHT_Y, "width": COL_W, "height": ROW_H},
+            "action": {
+                "type": "postback",
+                "label": "体重を今すぐ同期",
+                "data": "action=weight_sync",
+                "displayText": "⚖️ 体重を今すぐ同期！",
             },
         },
     ],
@@ -146,34 +163,42 @@ def _draw_button(draw: "ImageDraw.ImageDraw", x0: int, y0: int, x1: int, y1: int
 
 
 def generate_rich_menu_image() -> bytes:
-    """リッチメニュー画像を生成して PNG バイト列で返す。"""
+    """リッチメニュー画像を生成して PNG バイト列で返す。（2行×2列レイアウト）"""
     img = Image.new("RGB", (W, H), color=COLOR_BG)
     draw = ImageDraw.Draw(img)
 
-    # 列1: 分析開始（緑）
+    # 上段左: 分析開始（緑）
     _draw_button(
-        draw, COL1_X, 0, COL2_X - 2, H,
+        draw, TOP_LEFT_X, TOP_LEFT_Y, COL_W - 2, ROW_H - 2,
         COLOR_COL1,
         "🔍", "分析開始", "今日の全データを総括",
     )
 
-    # 列2: 明日のメニューを詳しく（青）
+    # 上段右: 明日のメニュー（青）
     _draw_button(
-        draw, COL2_X + 2, 0, COL3_X - 2, H,
+        draw, TOP_RIGHT_X + 2, TOP_RIGHT_Y, W, ROW_H - 2,
         COLOR_COL2,
         "🏃", "明日のメニュー", "翌日のトレーニング計画",
     )
 
-    # 列3: 今週の傾向を見る（紫）
+    # 下段左: 今週の傾向（紫）
     _draw_button(
-        draw, COL3_X + 2, 0, W, H,
+        draw, BOT_LEFT_X, BOT_LEFT_Y + 2, COL_W - 2, H,
         COLOR_COL3,
         "📊", "今週の傾向", "直近7日の運動・体重・睡眠",
     )
 
-    # 区切り線（列1-2 間 / 列2-3 間）
-    draw.rectangle([COL2_X - 2, 0, COL2_X + 2, H], fill=COLOR_DIVIDER)
-    draw.rectangle([COL3_X - 2, 0, COL3_X + 2, H], fill=COLOR_DIVIDER)
+    # 下段右: 体重同期（深紅）
+    _draw_button(
+        draw, BOT_RIGHT_X + 2, BOT_RIGHT_Y + 2, W, H,
+        COLOR_COL4,
+        "⚖️", "体重同期", "Eufyから今すぐ取得",
+    )
+
+    # 縦の区切り線（中央）
+    draw.rectangle([COL_W - 2, 0, COL_W + 2, H], fill=COLOR_DIVIDER)
+    # 横の区切り線（中央）
+    draw.rectangle([0, ROW_H - 2, W, ROW_H + 2], fill=COLOR_DIVIDER)
 
     buf = BytesIO()
     img.save(buf, format="PNG")
