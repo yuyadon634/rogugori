@@ -77,10 +77,10 @@ class SheetsClient:
                     "シート '%s' のヘッダーが不正です。修復します: %s → %s",
                     title, first_row, headers
                 )
-                ws.update("A1", [headers])
+                ws.update(range_name="A1", values=[headers])
         except gspread.WorksheetNotFound:
             ws = self._spreadsheet.add_worksheet(title=title, rows=1000, cols=len(headers))
-            ws.update("A1", [headers])
+            ws.update(range_name="A1", values=[headers])
             logger.info("シート '%s' を作成しました", title)
         return ws
 
@@ -104,7 +104,7 @@ class SheetsClient:
             if row.get("date") == today:
                 row_index = i + 2  # ヘッダー行 + 1-indexed
                 values = [data.get(h, row.get(h, "")) for h in DAILY_SUMMARY_HEADERS]
-                self._daily_ws.update(f"A{row_index}", [values])
+                self._daily_ws.update(range_name=f"A{row_index}", values=[values])
                 logger.debug("daily_summary 行を更新: %s", today)
                 return
         values = [data.get(h, "") for h in DAILY_SUMMARY_HEADERS]
@@ -164,7 +164,7 @@ class SheetsClient:
                 row.update(updates)
                 row_index = i + 2
                 values = [row.get(h, "") for h in STATUS_HEADERS]
-                self._status_ws.update(f"A{row_index}", [values])
+                self._status_ws.update(range_name=f"A{row_index}", values=[values])
                 logger.debug("status 行を更新: %s %s", today, updates)
                 return
         logger.warning("status 行が見つからないため update をスキップ: %s", today)
@@ -202,7 +202,7 @@ class SheetsClient:
         for i, row in enumerate(records):
             if row.get("key") == "garmin_session":
                 row_index = i + 2
-                self._session_ws.update(f"A{row_index}", [["garmin_session", session_json]])
+                self._session_ws.update(range_name=f"A{row_index}", values=[["garmin_session", session_json]])
                 logger.debug("Garmin セッションを更新しました")
                 return
         self._session_ws.append_row(["garmin_session", session_json])
@@ -227,7 +227,7 @@ class SheetsClient:
         for i, row in enumerate(records):
             if row.get("key") == "eufy_token":
                 row_index = i + 2
-                self._session_ws.update(f"A{row_index}", [["eufy_token", token_json]])
+                self._session_ws.update(range_name=f"A{row_index}", values=[["eufy_token", token_json]])
                 logger.debug("EufyLife トークンを更新しました")
                 return
         self._session_ws.append_row(["eufy_token", token_json])

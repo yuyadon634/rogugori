@@ -41,6 +41,14 @@ _JST = timezone(timedelta(hours=9))
 _MIN_PLAUSIBLE_WEIGHT = 20.0
 _MAX_PLAUSIBLE_WEIGHT = 300.0
 
+# 体脂肪率（%）の妥当範囲
+_MIN_PLAUSIBLE_BODY_FAT = 3.0
+_MAX_PLAUSIBLE_BODY_FAT = 70.0
+
+# BMI の妥当範囲
+_MIN_PLAUSIBLE_BMI = 10.0
+_MAX_PLAUSIBLE_BMI = 60.0
+
 # EufyLife API の認証エラーを示す res_code 群。これ以外の非 1 コードは
 # トークン切れと無関係（データなし・パラメータ不正など）なので再ログインしない。
 # 実測値が増えたらこのセットに追加すること。
@@ -66,24 +74,41 @@ def _null_if_zero(value) -> Optional[float]:
     return f
 
 
-def _normalize_weight(raw) -> Optional[float]:
+def _normalize_by_range(raw, min_val: float, max_val: float) -> Optional[float]:
     """
-    scale_data.weight を kg に正規化する。
-    API は体重を 1/10 kg 単位の整数（例: 750 = 75.0kg）で返すことが多いが、
-    将来 float 直値で返す可能性もあるため妥当範囲チェックでフォールバックする。
+    EufyLife API が 1/10 単位の整数で返す可能性がある値を正規化する汎用関数。
+    まず /10 した値が妥当範囲内かチェックし、そうでなければ生値を使う。
+    どちらも範囲外の場合は /10 値を返す（ログで気付けるように）。
     """
     f = _to_float(raw)
     if f is None or f == 0:
         return None
 
     scaled = f / 10.0
-    if _MIN_PLAUSIBLE_WEIGHT <= scaled <= _MAX_PLAUSIBLE_WEIGHT:
+    if min_val <= scaled <= max_val:
         return scaled
-    # /10 が非現実的でも、生値が妥当範囲ならそのまま使う
-    if _MIN_PLAUSIBLE_WEIGHT <= f <= _MAX_PLAUSIBLE_WEIGHT:
+    if min_val <= f <= max_val:
         return f
-    # どちらも妥当範囲外: とりあえず /10 を返す（ログで気付けるように）
     return scaled
+
+
+def _normalize_weight(raw) -> Optional[float]:
+    """
+    scale_data.weight を kg に正規化する。
+    API は体重を 1/10 kg 単位の整数（例: 750 = 75.0kg）で返すことが多いが、
+    将来 float 直値で返す可能性もあるため妥当範囲チェックでフォールバックする。
+    """
+    return _normalize_by_range(raw, _MIN_PLAUSIBLE_WEIGHT, _MAX_PLAUSIBLE_WEIGHT)
+
+
+def _normalize_body_fat(raw) -> Optional[float]:
+    """体脂肪率（%）を正規化する。API が ×10 整数で返す場合も考慮する。"""
+    return _normalize_by_range(raw, _MIN_PLAUSIBLE_BODY_FAT, _MAX_PLAUSIBLE_BODY_FAT)
+
+
+def _normalize_bmi(raw) -> Optional[float]:
+    """BMI を正規化する。API が ×10 整数で返す場合も考慮する。"""
+    return _normalize_by_range(raw, _MIN_PLAUSIBLE_BMI, _MAX_PLAUSIBLE_BMI)
 
 
 class EufyClient:
@@ -308,14 +333,14 @@ class EufyClient:
         """scale_data（またはフラットなレコード）から計測値を抽出・正規化する。"""
         weight = _normalize_weight(sd.get("weight") or sd.get("weight_kg"))
 
-        body_fat = _null_if_zero(
+        body_fat = _normalize_body_fat(
             sd.get("body_fat")
             or sd.get("body_fat_pct")
             or sd.get("bodyfat")
             or sd.get("body_fat_percentage")
         )
 
-        bmi = _null_if_zero(sd.get("bmi") or sd.get("bmi_index") or sd.get("BMI"))
+        bmi = _normalize_bmi(sd.get("bmi") or sd.get("bmi_index") or sd.get("BMI"))
         if bmi is None and weight and self._height_cm:
             height_m = self._height_cm / 100
             bmi = round(weight / (height_m ** 2), 1)
@@ -324,11 +349,11 @@ class EufyClient:
         # 除脂肪体重（fat-free mass）= 体重 − 体脂肪量。
         # 優先順: fat_free_weight 直値 → 体重−body_fat_mass → 体重×(1-体脂肪率)。
         # ※ muscle_mass は筋肉量のみで除脂肪体重より小さくなるため使わない。
-        lean_body_mass = _null_if_zero(
+        lean_body_mass = _normalize_weight(
             sd.get("fat_free_weight") or sd.get("fat_free_weight_kg")
         )
         if lean_body_mass is None and weight:
-            body_fat_mass = _null_if_zero(sd.get("body_fat_mass") or sd.get("body_fat_mass_kg"))
+            body_fat_mass = _normalize_weight(sd.get("body_fat_mass") or sd.get("body_fat_mass_kg"))
             if body_fat_mass is not None:
                 lean_body_mass = round(weight - body_fat_mass, 1)
             elif body_fat:
